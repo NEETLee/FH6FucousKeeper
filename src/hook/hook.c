@@ -169,17 +169,23 @@ HOOK_API void Hook_Uninstall(void)
 {
     if (!s_active) return;
 
-    if (s_subclassed && s_target_hwnd) {
-        SendMessage(s_target_hwnd, WM_HOOK_UNSUBCLASS, 0, 0);
+    HWND target = s_target_hwnd;
+
+    /* Clear shared state FIRST to prevent HookProc from re-subclassing */
+    s_target_hwnd = NULL;
+    s_active = FALSE;
+
+    /* Now safely unsubclass the window */
+    if (target && IsWindow(target)) {
+        SendMessage(target, WM_HOOK_UNSUBCLASS, 0, 0);
     }
 
+    /* Remove the hook after subclass is restored */
     if (s_hook_handle) {
         UnhookWindowsHookEx(s_hook_handle);
         s_hook_handle = NULL;
     }
 
-    s_active = FALSE;
-    s_target_hwnd = NULL;
     s_target_tid = 0;
     s_target_pid = 0;
 }

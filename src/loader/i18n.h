@@ -106,6 +106,14 @@ typedef enum {
     STR_VERSION_STORE,
     STR_VERSION_UNKNOWN,
 
+    /* About / Credits */
+    STR_ABOUT_BRIEF,
+    STR_ABOUT_AUTHOR,
+    STR_ABOUT_REPO,
+
+    /* Tip */
+    STR_TIP_WINDOWED,
+
     STR_COUNT
 } StringId;
 

@@ -56,6 +56,10 @@
 #define IDC_LBL_INTERVAL    1067
 #define IDC_LBL_OPTIONS     1068
 #define IDC_LBL_LANGUAGE    1069
+#define IDC_LBL_ABOUT_BRIEF 1070
+#define IDC_LBL_ABOUT_AUTHOR 1071
+#define IDC_LBL_ABOUT_REPO  1072
+#define IDC_LBL_TIP         1073
 
 /* Tray icon */
 #define IDI_APP_ICON        200

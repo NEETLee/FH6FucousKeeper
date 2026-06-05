@@ -1,8 +1,13 @@
 /*
- * audio_control.c - Process Audio Mute Control (WASAPI COM)
+ * audio_control.c - Process Audio Volume Control (WASAPI COM)
  *
  * Enumerates audio sessions to find the target process,
- * then uses ISimpleAudioVolume to mute/unmute it.
+ * then uses ISimpleAudioVolume to control its volume.
+ *
+ * Instead of using SetMute (which can trigger audio session callbacks
+ * in the game process and cause crashes), we set volume to 0.0 for mute
+ * and restore the saved volume for unmute. This is the same approach
+ * used by the Windows Volume Mixer.
  *
  * COM interfaces are accessed through vtable pointers for C compatibility.
  */
@@ -14,19 +19,19 @@
 #include <endpointvolume.h>
 
 static BOOL s_com_initialized = FALSE;
+static float s_saved_volume = 1.0f;
 
 /* ─── Public API ──────────────────────────────────────────────────── */
 
 BOOL AudioCtrl_Init(void)
 {
-    HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
     if (SUCCEEDED(hr) || hr == S_FALSE) {
         s_com_initialized = TRUE;
         return TRUE;
     }
-    /* RPC_E_CHANGED_MODE means COM is already initialized with different model - still OK */
     if (hr == RPC_E_CHANGED_MODE) {
-        s_com_initialized = FALSE; /* Don't uninitialize what we didn't initialize */
+        s_com_initialized = FALSE;
         return TRUE;
     }
     return FALSE;
@@ -84,7 +89,15 @@ BOOL AudioCtrl_MuteProcess(DWORD pid, BOOL mute)
         if (SUCCEEDED(hr) && sessionPid == pid) {
             hr = pCtrl->lpVtbl->QueryInterface(pCtrl, &IID_ISimpleAudioVolume, (void **)&pVolume);
             if (SUCCEEDED(hr)) {
-                pVolume->lpVtbl->SetMute(pVolume, mute, NULL);
+                if (mute) {
+                    /* Save current volume before muting */
+                    pVolume->lpVtbl->GetMasterVolume(pVolume, &s_saved_volume);
+                    if (s_saved_volume < 0.01f) s_saved_volume = 1.0f;
+                    pVolume->lpVtbl->SetMasterVolume(pVolume, 0.0f, NULL);
+                } else {
+                    /* Restore saved volume */
+                    pVolume->lpVtbl->SetMasterVolume(pVolume, s_saved_volume, NULL);
+                }
                 pVolume->lpVtbl->Release(pVolume);
                 result = TRUE;
             }
@@ -149,9 +162,9 @@ BOOL AudioCtrl_IsProcessMuted(DWORD pid)
         if (SUCCEEDED(hr) && sessionPid == pid) {
             hr = pCtrl->lpVtbl->QueryInterface(pCtrl, &IID_ISimpleAudioVolume, (void **)&pVolume);
             if (SUCCEEDED(hr)) {
-                BOOL m = FALSE;
-                pVolume->lpVtbl->GetMute(pVolume, &m);
-                muted = m;
+                float vol = 1.0f;
+                pVolume->lpVtbl->GetMasterVolume(pVolume, &vol);
+                muted = (vol < 0.01f);
                 pVolume->lpVtbl->Release(pVolume);
             }
         }

@@ -7,29 +7,40 @@
 ## 功能
 
 - **防暂停**：通过 DLL Hook 拦截窗口焦点消息，游戏切到后台也不会暂停
-- **静音控制**：可在防暂停的同时静音游戏，适合挂机场景
+- **静音控制**：独立的静音按钮，可随时静音/恢复游戏音频
 - **通用方案**：Steam 和 Microsoft Store 版本均适用
 - **中英双语**：支持中文/英文界面切换，默认跟随系统语言
+- **高 DPI 支持**：自动适配 2K/4K 等高分辨率显示器
 - **系统托盘**：支持最小化到托盘，后台静默运行
 - **全局热键**：Ctrl+F12 快速开关防暂停
+
+## 前置条件
+
+> ⚠️ **请将游戏切换到窗口模式运行**（快捷键 Alt+Enter）。本工具仅在窗口模式下有效。
+
+## 测试环境
+
+- Windows 11
+- Forza Horizon 6 Steam 版
+- Forza Horizon 6 Microsoft Store 版
 
 ## 截图
 
 ```
-┌─ FH6 FocusKeeper ─────────────────────┐
-│ [状态] [窗口列表] [日志] [设置]        │
-│                                        │
-│  ● 状态：防暂停已激活                  │
-│  游戏窗口：Forza Horizon 6             │
-│  窗口句柄：0x001A0B2C                  │
-│  进程 PID：12345                       │
-│                                        │
-│  拦截统计：                            │
-│    WM_KILLFOCUS    × 42                │
-│    WM_ACTIVATEAPP  × 38                │
-│                                        │
-│  [查找游戏窗口] [开启防暂停] [防暂停+静音]│
-└────────────────────────────────────────┘
+┌─ FH6 FocusKeeper ─────────────────────────┐
+│ [状态] [窗口列表] [日志] [设置]            │
+│                                            │
+│      ●  状态：防暂停已激活                 │
+│                                            │
+│  游戏窗口：Forza Horizon 6   拦截统计：    │
+│  窗口句柄：0x001A0B2C          WM_KILLFOCUS    × 42  │
+│  进程 PID：12345               WM_ACTIVATEAPP  × 38  │
+│                                            │
+│  [查找游戏窗口] [开启防暂停] [静音游戏]    │
+│                                            │
+│  ※ 请切换窗口模式运行游戏（快捷键 Alt+Enter） │
+│           By NEETLee & Claude Opus 4.6     │
+└────────────────────────────────────────────┘
 ```
 
 ## 原理
@@ -79,9 +90,10 @@ make debug    # 调试构建（含符号信息）
 
 1. 将 `FocusKeeper.exe` 和 `hook.dll` 放在同一目录
 2. **以管理员权限运行** `FocusKeeper.exe`（需要管理员权限才能注入到游戏进程）
-3. 启动游戏后，点击「查找游戏窗口」
-4. 点击「开启防暂停」或使用快捷键 Ctrl+F12
-5. 如需静音，点击「防暂停+静音」
+3. **将游戏切换到窗口模式**（Alt+Enter）
+4. 启动游戏后，点击「查找游戏窗口」
+5. 点击「开启防暂停」或使用快捷键 Ctrl+F12
+6. 如需静音，点击「静音游戏」
 
 ## 项目结构
 
@@ -94,7 +106,7 @@ FH6FocusKeeper/
 │   │   └── hook.def        # 共享段定义
 │   └── loader/
 │       ├── main.c          # 入口 + 模块协调 (Mediator)
-│       ├── gui.c/h         # Win32 标签页 GUI
+│       ├── gui.c/h         # Win32 标签页 GUI（DPI 感知）
 │       ├── tray.c/h        # 系统托盘图标
 │       ├── hook_manager.c/h # DLL 加载管理 (Facade)
 │       ├── msg_replay.c/h  # 消息重放 (Active Object)
@@ -106,7 +118,7 @@ FH6FocusKeeper/
 ├── res/
 │   ├── resource.h          # 控件 ID 定义
 │   ├── app.rc              # 资源脚本
-│   ├── app.manifest        # 应用清单
+│   ├── app.manifest        # 应用清单（PerMonitorV2 DPI）
 │   └── app.ico             # 应用图标
 ├── Makefile
 └── README.md
@@ -120,6 +132,10 @@ FH6FocusKeeper/
 - **Mediator**：main.c 协调各模块通信
 - **Active Object**：MsgReplay 独立线程定时发送消息
 - **Chain of Responsibility**：SubclassProc 消息过滤链
+
+## 作者
+
+NEETLee & Claude Opus 4.6
 
 ## 许可证
 

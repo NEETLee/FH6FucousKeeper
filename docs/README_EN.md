@@ -7,11 +7,22 @@
 ## Features
 
 - **Anti-Pause**: Intercepts window focus messages via DLL Hook so the game keeps running in the background
-- **Mute Control**: Optionally mute game audio while anti-pause is active (great for AFK scenarios)
+- **Mute Control**: Independent mute button to mute/unmute game audio anytime
 - **Universal**: Works with both Steam and Microsoft Store versions
 - **Bilingual UI**: Chinese/English interface with auto system language detection
+- **High-DPI Support**: Automatically scales for 2K/4K displays
 - **System Tray**: Minimizes to tray for silent background operation
 - **Global Hotkey**: Ctrl+F12 to toggle anti-pause
+
+## Prerequisites
+
+> ⚠️ **The game must be running in windowed mode** (press Alt+Enter to toggle). This tool only works in windowed mode.
+
+## Tested Environment
+
+- Windows 11
+- Forza Horizon 6 (Steam)
+- Forza Horizon 6 (Microsoft Store)
 
 ## How It Works
 
@@ -58,9 +69,10 @@ make debug    # Debug build (with symbols)
 
 1. Place `FocusKeeper.exe` and `hook.dll` in the same directory
 2. **Run as Administrator** (required to inject into the game process)
-3. Launch the game, then click "Find Game Window"
-4. Click "Enable Anti-Pause" or press Ctrl+F12
-5. For muted AFK mode, click "Anti-Pause + Mute"
+3. **Switch the game to windowed mode** (Alt+Enter)
+4. Launch the game, then click "Find Game Window"
+5. Click "Enable Anti-Pause" or press Ctrl+F12
+6. To mute game audio, click "Mute Game"
 
 ## Project Structure
 
@@ -73,7 +85,7 @@ FH6FocusKeeper/
 │   │   └── hook.def        # Shared section definition
 │   └── loader/
 │       ├── main.c          # Entry point + module coordinator (Mediator)
-│       ├── gui.c/h         # Win32 tabbed GUI
+│       ├── gui.c/h         # Win32 tabbed GUI (DPI-aware)
 │       ├── tray.c/h        # System tray icon
 │       ├── hook_manager.c/h # DLL loading manager (Facade)
 │       ├── msg_replay.c/h  # Message replay fallback (Active Object)
@@ -85,7 +97,7 @@ FH6FocusKeeper/
 ├── res/
 │   ├── resource.h          # Control IDs
 │   ├── app.rc              # Resource script
-│   ├── app.manifest        # Application manifest
+│   ├── app.manifest        # Application manifest (PerMonitorV2 DPI)
 │   └── app.ico             # Application icon
 ├── Makefile
 └── README.md
@@ -99,6 +111,10 @@ FH6FocusKeeper/
 - **Mediator**: main.c coordinates inter-module communication
 - **Active Object**: MsgReplay runs a dedicated thread for periodic messages
 - **Chain of Responsibility**: SubclassProc message filtering chain
+
+## Authors
+
+NEETLee & Claude Opus 4.6
 
 ## License
 

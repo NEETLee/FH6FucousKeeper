@@ -15,12 +15,17 @@
 #include "i18n.h"
 #include <stdio.h>
 #include <wchar.h>
+#include <shellapi.h>
 
 /* ─── Constants ───────────────────────────────────────────────────── */
-#define WINDOW_WIDTH    520
-#define WINDOW_HEIGHT   420
+#define BASE_WIDTH      520
+#define BASE_HEIGHT     420
 #define TAB_MARGIN      8
 #define CTRL_MARGIN     12
+
+/* ─── DPI Scaling ─────────────────────────────────────────────────── */
+static UINT s_dpi = 96;
+#define S(x) MulDiv((x), (int)s_dpi, 96)
 
 /* ─── Module State ────────────────────────────────────────────────── */
 static struct {
@@ -55,6 +60,12 @@ static struct {
     HWND        hwnd_chk_logfile;
     HWND        hwnd_edit_interval;
     HWND        hwnd_btn_save;
+
+    /* Footer font and brush */
+    HFONT       hFontFooter;
+    HFONT       hFontStatus;
+    HBRUSH      hBrushBg;
+    BOOL        hook_active;
 } s_gui = {0};
 
 /* ─── Forward Declarations ────────────────────────────────────────── */
@@ -91,9 +102,33 @@ static LRESULT CALLBACK PanelWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
         /* Forward to the top-level main window */
         return SendMessage(GetAncestor(hwnd, GA_ROOT), msg, wParam, lParam);
 
-    case WM_CTLCOLORSTATIC:
+    case WM_CTLCOLORSTATIC: {
+        int id = GetDlgCtrlID((HWND)lParam);
+        if (id == IDC_LBL_ABOUT_BRIEF || id == IDC_LBL_ABOUT_AUTHOR) {
+            HDC hdc = (HDC)wParam;
+            SetTextColor(hdc, RGB(130, 130, 130));
+            SetBkMode(hdc, TRANSPARENT);
+            return (LRESULT)GetSysColorBrush(COLOR_WINDOW);
+        }
+        if (id == IDC_LBL_TIP) {
+            HDC hdc = (HDC)wParam;
+            SetTextColor(hdc, RGB(180, 60, 60));
+            SetBkMode(hdc, TRANSPARENT);
+            return (LRESULT)GetSysColorBrush(COLOR_WINDOW);
+        }
+        if (id == IDC_STATUS_TEXT) {
+            HDC hdc = (HDC)wParam;
+            if (s_gui.hook_active)
+                SetTextColor(hdc, RGB(30, 140, 50));
+            else
+                SetTextColor(hdc, RGB(120, 120, 120));
+            SetBkMode(hdc, TRANSPARENT);
+            return (LRESULT)GetSysColorBrush(COLOR_WINDOW);
+        }
+        return (LRESULT)GetSysColorBrush(COLOR_WINDOW);
+    }
+
     case WM_CTLCOLORBTN:
-        /* Use window background color for child statics */
         return (LRESULT)GetSysColorBrush(COLOR_WINDOW);
     }
     return DefWindowProc(hwnd, msg, wParam, lParam);
@@ -129,29 +164,59 @@ static HWND CreateCtrlEx(DWORD exStyle, const WCHAR *cls, const WCHAR *text,
 HWND Gui_Create(const GuiContext *ctx)
 {
     WNDCLASSEXW wc = {0};
-    int screen_x, screen_y;
+    int screen_x, screen_y, win_w, win_h;
+    HDC hdc;
 
     if (!ctx) return NULL;
 
     s_gui.hInstance = ctx->hInstance;
     s_gui.settings = ctx->settings;
 
+    /* Detect system DPI for scaling */
+    hdc = GetDC(NULL);
+    s_dpi = (UINT)GetDeviceCaps(hdc, LOGPIXELSX);
+    ReleaseDC(NULL, hdc);
+    if (s_dpi < 96) s_dpi = 96;
+
     /* Initialize Common Controls */
-    INITCOMMONCONTROLSEX icc = { sizeof(icc), ICC_TAB_CLASSES | ICC_LISTVIEW_CLASSES };
+    INITCOMMONCONTROLSEX icc = { sizeof(icc), ICC_TAB_CLASSES | ICC_LISTVIEW_CLASSES | ICC_LINK_CLASS };
     InitCommonControlsEx(&icc);
 
     /* Register the panel container class */
     RegisterPanelClass(ctx->hInstance);
 
-    /* Create a modern UI font */
-    s_gui.hFont = CreateFontW(-14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+    /* Create a DPI-scaled UI font */
+    s_gui.hFont = CreateFontW(-S(14), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei UI");
     if (!s_gui.hFont) {
-        s_gui.hFont = CreateFontW(-14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        s_gui.hFont = CreateFontW(-S(14), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
             DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
             CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
     }
+
+    /* Footer font: smaller, italic */
+    s_gui.hFontFooter = CreateFontW(-S(11), 0, 0, 0, FW_NORMAL, TRUE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei UI");
+    if (!s_gui.hFontFooter) {
+        s_gui.hFontFooter = CreateFontW(-S(11), 0, 0, 0, FW_NORMAL, TRUE, FALSE, FALSE,
+            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+    }
+
+    /* Status font: larger, bold */
+    s_gui.hFontStatus = CreateFontW(-S(18), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei UI");
+    if (!s_gui.hFontStatus) {
+        s_gui.hFontStatus = CreateFontW(-S(18), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+    }
+
+    /* Background brush for footer color handling */
+    s_gui.hBrushBg = GetSysColorBrush(COLOR_WINDOW);
 
     /* Register window class */
     wc.cbSize = sizeof(wc);
@@ -168,9 +233,11 @@ HWND Gui_Create(const GuiContext *ctx)
 
     RegisterClassExW(&wc);
 
-    /* Center on screen */
-    screen_x = (GetSystemMetrics(SM_CXSCREEN) - WINDOW_WIDTH) / 2;
-    screen_y = (GetSystemMetrics(SM_CYSCREEN) - WINDOW_HEIGHT) / 2;
+    /* Center on screen with DPI-scaled size */
+    win_w = S(BASE_WIDTH);
+    win_h = S(BASE_HEIGHT);
+    screen_x = (GetSystemMetrics(SM_CXSCREEN) - win_w) / 2;
+    screen_y = (GetSystemMetrics(SM_CYSCREEN) - win_h) / 2;
 
     /* Create main window */
     s_gui.hwnd_main = CreateWindowExW(
@@ -178,7 +245,7 @@ HWND Gui_Create(const GuiContext *ctx)
         L"FH6FocusKeeperMain",
         L"FH6 FocusKeeper",
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-        screen_x, screen_y, WINDOW_WIDTH, WINDOW_HEIGHT,
+        screen_x, screen_y, win_w, win_h,
         NULL, NULL, ctx->hInstance, NULL
     );
 
@@ -208,11 +275,15 @@ void Gui_UpdateStatus(BOOL hook_active, const WCHAR *game_title,
 
     if (!s_gui.hwnd_status_text) return;
 
+    s_gui.hook_active = hook_active;
+
     if (hook_active) {
         SetWindowTextW(s_gui.hwnd_status_text, I18n_Get(STR_STATUS_ACTIVE));
     } else {
         SetWindowTextW(s_gui.hwnd_status_text, I18n_Get(STR_STATUS_IDLE));
     }
+    /* Force color update */
+    InvalidateRect(s_gui.hwnd_status_text, NULL, TRUE);
 
     _snwprintf(buf, 511,
         L"%s%s\r\n"
@@ -323,7 +394,7 @@ void Gui_UpdateButtons(BOOL hook_active, BOOL muted)
     }
     if (s_gui.hwnd_btn_disable) {
         SetWindowTextW(s_gui.hwnd_btn_disable,
-            (hook_active && muted) ? I18n_Get(STR_BTN_MUTE_DISABLE) : I18n_Get(STR_BTN_MUTE_ENABLE));
+            muted ? I18n_Get(STR_BTN_MUTE_DISABLE) : I18n_Get(STR_BTN_MUTE_ENABLE));
     }
 }
 
@@ -438,6 +509,22 @@ void Gui_RefreshLanguage(BOOL hook_active, BOOL muted)
     if (s_gui.hwnd_btn_save)
         SetWindowTextW(s_gui.hwnd_btn_save, I18n_Get(STR_BTN_SAVE));
 
+    /* About / credits labels */
+    HWND page0 = s_gui.pages[0];
+    if (page0) {
+        HWND hab = GetDlgItem(page0, IDC_LBL_ABOUT_BRIEF);
+        if (hab) SetWindowTextW(hab, I18n_Get(STR_ABOUT_BRIEF));
+        HWND htip = GetDlgItem(page0, IDC_LBL_TIP);
+        if (htip) SetWindowTextW(htip, I18n_Get(STR_TIP_WINDOWED));
+    }
+    if (page) {
+        HWND ha;
+        ha = GetDlgItem(page, IDC_LBL_ABOUT_AUTHOR);
+        if (ha) SetWindowTextW(ha, I18n_Get(STR_ABOUT_AUTHOR));
+        ha = GetDlgItem(page, IDC_LBL_ABOUT_REPO);
+        if (ha) SetWindowTextW(ha, I18n_Get(STR_ABOUT_REPO));
+    }
+
     /* Force full repaint including all child controls */
     RedrawWindow(s_gui.hwnd_main, NULL, NULL,
         RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
@@ -454,8 +541,8 @@ static void CreateTabControl(HWND parent)
 
     s_gui.hwnd_tab = CreateWindowExW(0, WC_TABCONTROLW, L"",
         WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | TCS_TABS,
-        TAB_MARGIN, TAB_MARGIN,
-        rc.right - TAB_MARGIN * 2, rc.bottom - TAB_MARGIN * 2,
+        S(TAB_MARGIN), S(TAB_MARGIN),
+        rc.right - S(TAB_MARGIN) * 2, rc.bottom - S(TAB_MARGIN) * 2,
         parent, (HMENU)IDC_TAB, s_gui.hInstance, NULL);
 
     SendMessage(s_gui.hwnd_tab, WM_SETFONT, (WPARAM)s_gui.hFont, TRUE);
@@ -479,30 +566,52 @@ static void CreateTabControl(HWND parent)
 
 static void CreateStatusPage(HWND parent)
 {
+    int pw = S(484);
     HWND page = CreateWindowExW(0, PANEL_CLASS, L"",
         WS_CHILD | WS_CLIPCHILDREN,
         0, 0, 0, 0, parent, NULL, s_gui.hInstance, NULL);
     s_gui.pages[0] = page;
 
+    /*
+     * Layout: status banner (centered) → info columns → buttons → tip → signature
+     * Page height ~330 base px.
+     */
+
+    /* Status indicator - vertically and horizontally centered in top banner area (0..80) */
     s_gui.hwnd_status_text = CreateCtrl(L"STATIC", I18n_Get(STR_STATUS_IDLE),
-        SS_LEFT, CTRL_MARGIN, 10, 400, 24, page, IDC_STATUS_TEXT);
+        SS_CENTER | SS_CENTERIMAGE, 0, 0, pw, S(80), page, IDC_STATUS_TEXT);
+    if (s_gui.hwnd_status_text && s_gui.hFontStatus)
+        SendMessage(s_gui.hwnd_status_text, WM_SETFONT, (WPARAM)s_gui.hFontStatus, TRUE);
 
-    s_gui.hwnd_game_info = CreateCtrl(L"STATIC",
-        L"",
-        SS_LEFT, CTRL_MARGIN, 44, 440, 80, page, IDC_GAME_TITLE);
+    /* Two-column: game info (left) | stats (right) */
+    int col_left = S(24);
+    int col_right = S(250);
+    s_gui.hwnd_game_info = CreateCtrl(L"STATIC", L"",
+        SS_LEFT, col_left, S(86), S(215), S(72), page, IDC_GAME_TITLE);
 
-    s_gui.hwnd_stats = CreateCtrl(L"STATIC",
-        L"",
-        SS_LEFT, CTRL_MARGIN, 134, 440, 100, page, IDC_STAT_KILLFOCUS);
+    s_gui.hwnd_stats = CreateCtrl(L"STATIC", L"",
+        SS_LEFT, col_right, S(86), S(225), S(110), page, IDC_STAT_KILLFOCUS);
 
+    /* Buttons row - evenly distributed */
+    int btn_y = S(208);
     s_gui.hwnd_btn_find = CreateCtrl(L"BUTTON", I18n_Get(STR_BTN_FIND),
-        BS_PUSHBUTTON, CTRL_MARGIN, 250, 130, 30, page, IDC_BTN_FIND);
+        BS_PUSHBUTTON, S(11), btn_y, S(145), S(32), page, IDC_BTN_FIND);
 
     s_gui.hwnd_btn_enable = CreateCtrl(L"BUTTON", I18n_Get(STR_BTN_ENABLE),
-        BS_PUSHBUTTON, 150, 250, 140, 30, page, IDC_BTN_ENABLE);
+        BS_PUSHBUTTON, S(167), btn_y, S(155), S(32), page, IDC_BTN_ENABLE);
 
     s_gui.hwnd_btn_disable = CreateCtrl(L"BUTTON", I18n_Get(STR_BTN_MUTE_ENABLE),
-        BS_PUSHBUTTON, 303, 250, 150, 30, page, IDC_BTN_MUTE_TOGGLE);
+        BS_PUSHBUTTON, S(333), btn_y, S(140), S(32), page, IDC_BTN_MUTE_TOGGLE);
+
+    /* Tip - prominent, below buttons */
+    CreateCtrl(L"STATIC", I18n_Get(STR_TIP_WINDOWED),
+        SS_CENTER | SS_NOPREFIX, 0, S(252), pw, S(20), page, IDC_LBL_TIP);
+
+    /* Signature - small italic gray, flush to page bottom */
+    HWND hAbout = CreateCtrl(L"STATIC", I18n_Get(STR_ABOUT_BRIEF),
+        SS_CENTER | SS_NOPREFIX, 0, S(318), pw, S(14), page, IDC_LBL_ABOUT_BRIEF);
+    if (hAbout && s_gui.hFontFooter)
+        SendMessage(hAbout, WM_SETFONT, (WPARAM)s_gui.hFontFooter, TRUE);
 }
 
 /* ─── Window List Page ────────────────────────────────────────────── */
@@ -510,6 +619,7 @@ static void CreateStatusPage(HWND parent)
 static void CreateWindowListPage(HWND parent)
 {
     LVCOLUMNW lvc;
+    int m = S(CTRL_MARGIN);
     HWND page = CreateWindowExW(0, PANEL_CLASS, L"",
         WS_CHILD | WS_CLIPCHILDREN,
         0, 0, 0, 0, parent, NULL, s_gui.hInstance, NULL);
@@ -517,39 +627,40 @@ static void CreateWindowListPage(HWND parent)
 
     s_gui.hwnd_listview = CreateCtrlEx(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"",
         LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS,
-        CTRL_MARGIN, 10, 460, 230, page, IDC_WINDOW_LIST);
+        m, S(8), S(460), S(282), page, IDC_WINDOW_LIST);
 
     ListView_SetExtendedListViewStyle(s_gui.hwnd_listview,
         LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
 
     lvc.mask = LVCF_TEXT | LVCF_WIDTH;
 
-    lvc.pszText = (LPWSTR)I18n_Get(STR_COL_TITLE);  lvc.cx = 160;
+    lvc.pszText = (LPWSTR)I18n_Get(STR_COL_TITLE);  lvc.cx = S(160);
     ListView_InsertColumn(s_gui.hwnd_listview, 0, &lvc);
 
-    lvc.pszText = (LPWSTR)I18n_Get(STR_COL_CLASS);  lvc.cx = 100;
+    lvc.pszText = (LPWSTR)I18n_Get(STR_COL_CLASS);  lvc.cx = S(100);
     ListView_InsertColumn(s_gui.hwnd_listview, 1, &lvc);
 
-    lvc.pszText = (LPWSTR)I18n_Get(STR_COL_PROCESS); lvc.cx = 100;
+    lvc.pszText = (LPWSTR)I18n_Get(STR_COL_PROCESS); lvc.cx = S(100);
     ListView_InsertColumn(s_gui.hwnd_listview, 2, &lvc);
 
-    lvc.pszText = (LPWSTR)I18n_Get(STR_COL_PID);    lvc.cx = 50;
+    lvc.pszText = (LPWSTR)I18n_Get(STR_COL_PID);    lvc.cx = S(50);
     ListView_InsertColumn(s_gui.hwnd_listview, 3, &lvc);
 
-    lvc.pszText = (LPWSTR)I18n_Get(STR_COL_HWND);   lvc.cx = 80;
+    lvc.pszText = (LPWSTR)I18n_Get(STR_COL_HWND);   lvc.cx = S(80);
     ListView_InsertColumn(s_gui.hwnd_listview, 4, &lvc);
 
     s_gui.hwnd_btn_refresh = CreateCtrl(L"BUTTON", I18n_Get(STR_BTN_REFRESH),
-        BS_PUSHBUTTON, CTRL_MARGIN, 250, 100, 28, page, IDC_BTN_REFRESH);
+        BS_PUSHBUTTON, m, S(298), S(100), S(28), page, IDC_BTN_REFRESH);
 
     s_gui.hwnd_btn_select = CreateCtrl(L"BUTTON", I18n_Get(STR_BTN_SELECT),
-        BS_PUSHBUTTON, 125, 250, 130, 28, page, IDC_BTN_SELECT);
+        BS_PUSHBUTTON, m + S(115), S(298), S(140), S(28), page, IDC_BTN_SELECT);
 }
 
 /* ─── Log Page ────────────────────────────────────────────────────── */
 
 static void CreateLogPage(HWND parent)
 {
+    int m = S(CTRL_MARGIN);
     HWND page = CreateWindowExW(0, PANEL_CLASS, L"",
         WS_CHILD | WS_CLIPCHILDREN,
         0, 0, 0, 0, parent, NULL, s_gui.hInstance, NULL);
@@ -557,53 +668,62 @@ static void CreateLogPage(HWND parent)
 
     s_gui.hwnd_log_edit = CreateCtrlEx(WS_EX_CLIENTEDGE, L"EDIT", L"",
         ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL,
-        CTRL_MARGIN, 10, 460, 248, page, IDC_LOG_EDIT);
+        m, S(8), S(460), S(284), page, IDC_LOG_EDIT);
 
     s_gui.hwnd_btn_clear = CreateCtrl(L"BUTTON", I18n_Get(STR_BTN_CLEAR_LOG),
-        BS_PUSHBUTTON, CTRL_MARGIN, 266, 100, 28, page, IDC_BTN_CLEAR_LOG);
+        BS_PUSHBUTTON, m, S(298), S(100), S(28), page, IDC_BTN_CLEAR_LOG);
 }
 
 /* ─── Settings Page ───────────────────────────────────────────────── */
 
 static void CreateSettingsPage(HWND parent)
 {
-    int y = 10;
+    int m = S(CTRL_MARGIN);
+    int y = S(10);
     HWND page = CreateWindowExW(0, PANEL_CLASS, L"",
         WS_CHILD | WS_CLIPCHILDREN,
         0, 0, 0, 0, parent, NULL, s_gui.hInstance, NULL);
     s_gui.pages[3] = page;
 
-    CreateCtrl(L"STATIC", I18n_Get(STR_SETTINGS_INTERVAL), SS_LEFT, CTRL_MARGIN, y, 170, 20, page, IDC_LBL_INTERVAL);
+    CreateCtrl(L"STATIC", I18n_Get(STR_SETTINGS_INTERVAL), SS_LEFT, m, y, S(170), S(20), page, IDC_LBL_INTERVAL);
     s_gui.hwnd_edit_interval = CreateCtrlEx(WS_EX_CLIENTEDGE, L"EDIT", L"30",
-        ES_NUMBER, 185, y - 2, 50, 22, page, IDC_EDIT_INTERVAL);
+        ES_NUMBER, S(185), y - S(2), S(50), S(22), page, IDC_EDIT_INTERVAL);
 
-    y += 36;
-    CreateCtrl(L"STATIC", I18n_Get(STR_SETTINGS_OPTIONS), SS_LEFT, CTRL_MARGIN, y, 80, 20, page, IDC_LBL_OPTIONS);
-    y += 24;
+    y += S(36);
+    CreateCtrl(L"STATIC", I18n_Get(STR_SETTINGS_OPTIONS), SS_LEFT, m, y, S(80), S(20), page, IDC_LBL_OPTIONS);
+    y += S(24);
 
     s_gui.hwnd_chk_autofind = CreateCtrl(L"BUTTON", I18n_Get(STR_SETTINGS_AUTOFIND),
-        BS_AUTOCHECKBOX, CTRL_MARGIN + 10, y, 300, 20, page, IDC_CHK_AUTOFIND);
-    y += 26;
+        BS_AUTOCHECKBOX, m + S(10), y, S(300), S(20), page, IDC_CHK_AUTOFIND);
+    y += S(26);
 
     s_gui.hwnd_chk_tray = CreateCtrl(L"BUTTON", I18n_Get(STR_SETTINGS_TRAY),
-        BS_AUTOCHECKBOX, CTRL_MARGIN + 10, y, 300, 20, page, IDC_CHK_TRAY);
-    y += 26;
+        BS_AUTOCHECKBOX, m + S(10), y, S(300), S(20), page, IDC_CHK_TRAY);
+    y += S(26);
 
     s_gui.hwnd_chk_logfile = CreateCtrl(L"BUTTON", I18n_Get(STR_SETTINGS_LOGFILE),
-        BS_AUTOCHECKBOX, CTRL_MARGIN + 10, y, 300, 20, page, IDC_CHK_LOGFILE);
+        BS_AUTOCHECKBOX, m + S(10), y, S(300), S(20), page, IDC_CHK_LOGFILE);
 
-    y += 36;
-    CreateCtrl(L"STATIC", I18n_Get(STR_SETTINGS_LANGUAGE), SS_LEFT, CTRL_MARGIN, y, 60, 20, page, IDC_LBL_LANGUAGE);
+    y += S(36);
+    CreateCtrl(L"STATIC", I18n_Get(STR_SETTINGS_LANGUAGE), SS_LEFT, m, y, S(80), S(20), page, IDC_LBL_LANGUAGE);
     CreateCtrl(L"BUTTON", I18n_Get(STR_SETTINGS_LANG_AUTO),
-        BS_AUTORADIOBUTTON | WS_GROUP, 75, y, 100, 20, page, IDC_RADIO_LANG_AUTO);
+        BS_AUTORADIOBUTTON | WS_GROUP, S(95), y, S(110), S(20), page, IDC_RADIO_LANG_AUTO);
     CreateCtrl(L"BUTTON", I18n_Get(STR_SETTINGS_LANG_ZH),
-        BS_AUTORADIOBUTTON, 180, y, 60, 20, page, IDC_RADIO_LANG_ZH);
+        BS_AUTORADIOBUTTON, S(210), y, S(60), S(20), page, IDC_RADIO_LANG_ZH);
     CreateCtrl(L"BUTTON", I18n_Get(STR_SETTINGS_LANG_EN),
-        BS_AUTORADIOBUTTON, 245, y, 80, 20, page, IDC_RADIO_LANG_EN);
+        BS_AUTORADIOBUTTON, S(275), y, S(80), S(20), page, IDC_RADIO_LANG_EN);
 
-    y += 36;
+    y += S(36);
     s_gui.hwnd_btn_save = CreateCtrl(L"BUTTON", I18n_Get(STR_BTN_SAVE),
-        BS_PUSHBUTTON, CTRL_MARGIN, y, 110, 28, page, IDC_BTN_SAVE);
+        BS_PUSHBUTTON, m, y, S(110), S(28), page, IDC_BTN_SAVE);
+
+    /* About / credits - footer style at bottom */
+    {
+        HWND hRepo = CreateCtrl(L"SysLink", I18n_Get(STR_ABOUT_REPO),
+            0, m, S(318), S(420), S(16), page, IDC_LBL_ABOUT_REPO);
+        if (hRepo && s_gui.hFontFooter)
+            SendMessage(hRepo, WM_SETFONT, (WPARAM)s_gui.hFontFooter, TRUE);
+    }
 
     /* Apply current settings to controls */
     if (s_gui.settings) {
@@ -676,6 +796,11 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
             int sel = TabCtrl_GetCurSel(s_gui.hwnd_tab);
             SwitchPage(sel);
         }
+        if (nmhdr->idFrom == IDC_LBL_ABOUT_REPO &&
+            (nmhdr->code == NM_CLICK || nmhdr->code == NM_RETURN)) {
+            ShellExecuteW(NULL, L"open",
+                L"https://github.com/NEETLee/FH6FucousKeeper", NULL, NULL, SW_SHOWNORMAL);
+        }
         break;
     }
 
@@ -702,6 +827,14 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         if (s_gui.hFont) {
             DeleteObject(s_gui.hFont);
             s_gui.hFont = NULL;
+        }
+        if (s_gui.hFontFooter) {
+            DeleteObject(s_gui.hFontFooter);
+            s_gui.hFontFooter = NULL;
+        }
+        if (s_gui.hFontStatus) {
+            DeleteObject(s_gui.hFontStatus);
+            s_gui.hFontStatus = NULL;
         }
         PostQuitMessage(0);
         break;

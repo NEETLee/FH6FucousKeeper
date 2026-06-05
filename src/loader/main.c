@@ -277,24 +277,22 @@ static void DoToggleHook(void)
 
 static void DoMuteToggle(void)
 {
-    if (s_app.hook_active && s_app.game_muted) {
-        /* Currently active+muted -> disable everything and unmute */
-        if (s_app.game_pid) {
-            AudioCtrl_MuteProcess(s_app.game_pid, FALSE);
-            s_app.game_muted = FALSE;
-            LOG_I(L"%s", I18n_Get(STR_LOG_UNMUTED));
+    if (!s_app.game_pid) {
+        DoFindGame();
+        if (!s_app.game_pid) {
+            LOG_W(L"Cannot mute: game not found");
+            return;
         }
-        DoDisableHook();
+    }
+
+    if (s_app.game_muted) {
+        AudioCtrl_MuteProcess(s_app.game_pid, FALSE);
+        s_app.game_muted = FALSE;
+        LOG_I(L"%s", I18n_Get(STR_LOG_UNMUTED));
     } else {
-        /* Enable hook + mute */
-        if (!s_app.hook_active) {
-            DoEnableHook();
-        }
-        if (s_app.hook_active && s_app.game_pid) {
-            AudioCtrl_MuteProcess(s_app.game_pid, TRUE);
-            s_app.game_muted = TRUE;
-            LOG_I(L"%s", I18n_Get(STR_LOG_MUTED));
-        }
+        AudioCtrl_MuteProcess(s_app.game_pid, TRUE);
+        s_app.game_muted = TRUE;
+        LOG_I(L"%s", I18n_Get(STR_LOG_MUTED));
     }
     Gui_UpdateButtons(s_app.hook_active, s_app.game_muted);
 }

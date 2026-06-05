@@ -13,9 +13,9 @@ static Language s_current_lang = LANG_ZH;
 static const WCHAR *s_strings_zh[STR_COUNT] = {
     /* STR_APP_TITLE */         L"FH6 FocusKeeper",
 
-    /* STR_STATUS_IDLE */       L"\u25cb \u72b6\u6001\uff1a\u672a\u6fc0\u6d3b",
-    /* STR_STATUS_ACTIVE */     L"\u25cf \u72b6\u6001\uff1a\u9632\u6682\u505c\u5df2\u6fc0\u6d3b",
-    /* STR_STATUS_ACTIVE_MUTED */ L"\u25cf \u72b6\u6001\uff1a\u9632\u6682\u505c\u5df2\u6fc0\u6d3b\uff08\u5df2\u9759\u97f3\uff09",
+    /* STR_STATUS_IDLE */       L"\u25cf  \u72b6\u6001\uff1a\u672a\u6fc0\u6d3b",
+    /* STR_STATUS_ACTIVE */     L"\u25cf  \u72b6\u6001\uff1a\u9632\u6682\u505c\u5df2\u6fc0\u6d3b",
+    /* STR_STATUS_ACTIVE_MUTED */ L"\u25cf  \u72b6\u6001\uff1a\u9632\u6682\u505c\u5df2\u6fc0\u6d3b\uff08\u5df2\u9759\u97f3\uff09",
     /* STR_GAME_WINDOW */       L"\u6e38\u620f\u7a97\u53e3\uff1a",
     /* STR_GAME_VERSION */      L"\u7248\u672c\u7c7b\u578b\uff1a",
     /* STR_GAME_HWND */         L"\u7a97\u53e3\u53e5\u67c4\uff1a",
@@ -26,8 +26,8 @@ static const WCHAR *s_strings_zh[STR_COUNT] = {
     /* STR_BTN_FIND */          L"\u67e5\u627e\u6e38\u620f\u7a97\u53e3",
     /* STR_BTN_ENABLE */        L"\u5f00\u542f\u9632\u6682\u505c",
     /* STR_BTN_DISABLE */       L"\u5173\u95ed\u9632\u6682\u505c",
-    /* STR_BTN_MUTE_ENABLE */   L"\u9632\u6682\u505c+\u9759\u97f3",
-    /* STR_BTN_MUTE_DISABLE */  L"\u53d6\u6d88\u9759\u97f3\u5e76\u5173\u95ed",
+    /* STR_BTN_MUTE_ENABLE */   L"\u9759\u97f3\u6e38\u620f",
+    /* STR_BTN_MUTE_DISABLE */  L"\u53d6\u6d88\u9759\u97f3",
 
     /* STR_TAB_STATUS */        L"\u72b6\u6001",
     /* STR_TAB_WINDOWS */       L"\u7a97\u53e3\u5217\u8868",
@@ -88,15 +88,21 @@ static const WCHAR *s_strings_zh[STR_COUNT] = {
     /* STR_VERSION_STEAM */     L"Steam (Win32)",
     /* STR_VERSION_STORE */     L"Store (UWP)",
     /* STR_VERSION_UNKNOWN */   L"\u672a\u77e5",
+
+    /* STR_ABOUT_BRIEF */       L"By NEETLee & Claude Opus 4.6",
+    /* STR_ABOUT_AUTHOR */      L"\u4f5c\u8005\uff1aNEETLee & Claude Opus 4.6",
+    /* STR_ABOUT_REPO */        L"GitHub: <a href=\"https://github.com/NEETLee/FH6FucousKeeper\">https://github.com/NEETLee/FH6FucousKeeper</a>",
+
+    /* STR_TIP_WINDOWED */      L"\u203b \u8bf7\u5207\u6362\u7a97\u53e3\u6a21\u5f0f\u8fd0\u884c\u6e38\u620f\uff08\u6e38\u620f\u5feb\u6377\u952e Alt+Enter\uff09",
 };
 
 /* ─── English String Table ────────────────────────────────────────── */
 static const WCHAR *s_strings_en[STR_COUNT] = {
     /* STR_APP_TITLE */         L"FH6 FocusKeeper",
 
-    /* STR_STATUS_IDLE */       L"\u25cb Status: Inactive",
-    /* STR_STATUS_ACTIVE */     L"\u25cf Status: Anti-Pause Active",
-    /* STR_STATUS_ACTIVE_MUTED */ L"\u25cf Status: Anti-Pause Active (Muted)",
+    /* STR_STATUS_IDLE */       L"\u25cf  Status: Inactive",
+    /* STR_STATUS_ACTIVE */     L"\u25cf  Status: Anti-Pause Active",
+    /* STR_STATUS_ACTIVE_MUTED */ L"\u25cf  Status: Anti-Pause Active (Muted)",
     /* STR_GAME_WINDOW */       L"Game Window: ",
     /* STR_GAME_VERSION */      L"Version: ",
     /* STR_GAME_HWND */         L"HWND: ",
@@ -107,8 +113,8 @@ static const WCHAR *s_strings_en[STR_COUNT] = {
     /* STR_BTN_FIND */          L"Find Game Window",
     /* STR_BTN_ENABLE */        L"Enable Anti-Pause",
     /* STR_BTN_DISABLE */       L"Disable Anti-Pause",
-    /* STR_BTN_MUTE_ENABLE */   L"Anti-Pause + Mute",
-    /* STR_BTN_MUTE_DISABLE */  L"Unmute & Disable",
+    /* STR_BTN_MUTE_ENABLE */   L"Mute Game",
+    /* STR_BTN_MUTE_DISABLE */  L"Unmute Game",
 
     /* STR_TAB_STATUS */        L"Status",
     /* STR_TAB_WINDOWS */       L"Windows",
@@ -169,6 +175,12 @@ static const WCHAR *s_strings_en[STR_COUNT] = {
     /* STR_VERSION_STEAM */     L"Steam (Win32)",
     /* STR_VERSION_STORE */     L"Store (UWP)",
     /* STR_VERSION_UNKNOWN */   L"Unknown",
+
+    /* STR_ABOUT_BRIEF */       L"By NEETLee & Claude Opus 4.6",
+    /* STR_ABOUT_AUTHOR */      L"Author: NEETLee & Claude Opus 4.6",
+    /* STR_ABOUT_REPO */        L"GitHub: <a href=\"https://github.com/NEETLee/FH6FucousKeeper\">https://github.com/NEETLee/FH6FucousKeeper</a>",
+
+    /* STR_TIP_WINDOWED */      L"\u203b Please run the game in windowed mode (game hotkey Alt+Enter)",
 };
 
 /* ─── Public API ──────────────────────────────────────────────────── */
