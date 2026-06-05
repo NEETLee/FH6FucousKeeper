@@ -12,22 +12,22 @@ jobs:
   build:
     runs-on: windows-latest
 
+    defaults:
+      run:
+        shell: msys2 {0}
+
     steps:
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          install: mingw-w64-x86_64-gcc make
+
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download w64devkit
-        shell: pwsh
-        run: |
-          $url = "https://github.com/skeeto/w64devkit/releases/download/v2.0.0/w64devkit-x64-2.0.0.zip"
-          Invoke-WebRequest -Uri $url -OutFile w64devkit.zip
-          Expand-Archive -Path w64devkit.zip -DestinationPath .
-
       - name: Build
-        shell: pwsh
-        run: |
-          $env:PATH = "$PWD\w64devkit\bin;$env:PATH"
-          make
+        run: make
 
       - name: Package
         shell: pwsh
