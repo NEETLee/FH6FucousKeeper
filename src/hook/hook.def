@@ -1,0 +1,11 @@
+LIBRARY hook
+EXPORTS
+    Hook_Install
+    Hook_Uninstall
+    Hook_IsActive
+    Hook_GetStats
+    Hook_ResetStats
+    Hook_GetTarget
+
+SECTIONS
+    FKShared READ WRITE SHARED

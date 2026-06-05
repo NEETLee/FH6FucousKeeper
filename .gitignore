@@ -1,0 +1,24 @@
+# Build output
+build/
+*.o
+*.a
+*.exe
+*.dll
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Settings generated at runtime
+*.ini
+*.log
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Cursor
+assets/
