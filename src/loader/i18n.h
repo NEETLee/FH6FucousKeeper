@@ -114,6 +114,24 @@ typedef enum {
     /* Tip */
     STR_TIP_WINDOWED,
 
+    /* Settings - Prevent Sleep */
+    STR_SETTINGS_PREVENT_SLEEP,
+
+    /* Auto Race page */
+    STR_TAB_AUTO_RACE,
+    STR_RACE_PROFILE,
+    STR_RACE_BTN_START,
+    STR_RACE_BTN_STOP,
+    STR_RACE_STATUS_IDLE,
+    STR_RACE_STATUS_RUNNING,
+    STR_RACE_STATUS_ERROR,
+    STR_RACE_STEP,
+    STR_RACE_LAPS,
+    STR_RACE_TIME,
+    STR_RACE_TIP,
+    STR_LOG_RACE_STARTED,
+    STR_LOG_RACE_STOPPED,
+
     STR_COUNT
 } StringId;
 

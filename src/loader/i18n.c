@@ -94,6 +94,22 @@ static const WCHAR *s_strings_zh[STR_COUNT] = {
     /* STR_ABOUT_REPO */        L"GitHub: <a href=\"https://github.com/NEETLee/FH6FucousKeeper\">https://github.com/NEETLee/FH6FucousKeeper</a>",
 
     /* STR_TIP_WINDOWED */      L"\u203b \u8bf7\u5207\u6362\u7a97\u53e3\u6a21\u5f0f\u8fd0\u884c\u6e38\u620f\uff08\u6e38\u620f\u5feb\u6377\u952e Alt+Enter\uff09",
+
+    /* STR_SETTINGS_PREVENT_SLEEP */ L"\u9632\u6682\u505c\u65f6\u963b\u6b62\u7cfb\u7edf\u4f11\u7720",
+
+    /* STR_TAB_AUTO_RACE */     L"\u81ea\u52a8\u8d5b\u4e8b",
+    /* STR_RACE_PROFILE */      L"\u8d5b\u4e8b\u914d\u7f6e\uff1a",
+    /* STR_RACE_BTN_START */    L"\u5f00\u59cb\u81ea\u52a8\u8d5b\u4e8b",
+    /* STR_RACE_BTN_STOP */     L"\u505c\u6b62\u81ea\u52a8\u8d5b\u4e8b",
+    /* STR_RACE_STATUS_IDLE */  L"\u72b6\u6001\uff1a\u672a\u8fd0\u884c",
+    /* STR_RACE_STATUS_RUNNING */ L"\u72b6\u6001\uff1a\u8fd0\u884c\u4e2d",
+    /* STR_RACE_STATUS_ERROR */ L"\u72b6\u6001\uff1a\u9519\u8bef",
+    /* STR_RACE_STEP */         L"\u5f53\u524d\u6b65\u9aa4\uff1a",
+    /* STR_RACE_LAPS */         L"\u5df2\u5b8c\u6210\u5708\u6570\uff1a",
+    /* STR_RACE_TIME */         L"\u8fd0\u884c\u65f6\u95f4\uff1a",
+    /* STR_RACE_TIP */          L"\u203b \u8bf7\u5148\u5728\u6e38\u620f\u4e2d\u5f00\u542f\u81ea\u52a8\u8f6c\u5411\u8f85\u52a9\uff0c\u70ed\u952e Ctrl+F11 \u5207\u6362",
+    /* STR_LOG_RACE_STARTED */  L"\u81ea\u52a8\u8d5b\u4e8b\u5df2\u542f\u52a8",
+    /* STR_LOG_RACE_STOPPED */  L"\u81ea\u52a8\u8d5b\u4e8b\u5df2\u505c\u6b62",
 };
 
 /* ─── English String Table ────────────────────────────────────────── */
@@ -181,6 +197,22 @@ static const WCHAR *s_strings_en[STR_COUNT] = {
     /* STR_ABOUT_REPO */        L"GitHub: <a href=\"https://github.com/NEETLee/FH6FucousKeeper\">https://github.com/NEETLee/FH6FucousKeeper</a>",
 
     /* STR_TIP_WINDOWED */      L"\u203b Please run the game in windowed mode (game hotkey Alt+Enter)",
+
+    /* STR_SETTINGS_PREVENT_SLEEP */ L"Prevent sleep while active",
+
+    /* STR_TAB_AUTO_RACE */     L"Auto Race",
+    /* STR_RACE_PROFILE */      L"Profile:",
+    /* STR_RACE_BTN_START */    L"Start Auto Race",
+    /* STR_RACE_BTN_STOP */     L"Stop Auto Race",
+    /* STR_RACE_STATUS_IDLE */  L"Status: Idle",
+    /* STR_RACE_STATUS_RUNNING */ L"Status: Running",
+    /* STR_RACE_STATUS_ERROR */ L"Status: Error",
+    /* STR_RACE_STEP */         L"Current Step:",
+    /* STR_RACE_LAPS */         L"Laps Completed:",
+    /* STR_RACE_TIME */         L"Running Time:",
+    /* STR_RACE_TIP */          L"\u203b Enable auto-steer assist in game first. Hotkey: Ctrl+F11",
+    /* STR_LOG_RACE_STARTED */  L"Auto race started",
+    /* STR_LOG_RACE_STOPPED */  L"Auto race stopped",
 };
 
 /* ─── Public API ──────────────────────────────────────────────────── */

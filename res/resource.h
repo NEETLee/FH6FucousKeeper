@@ -60,6 +60,18 @@
 #define IDC_LBL_ABOUT_AUTHOR 1071
 #define IDC_LBL_ABOUT_REPO  1072
 #define IDC_LBL_TIP         1073
+#define IDC_CHK_PREVENT_SLEEP 1074
+#define IDC_LBL_UPDATE       1075
+
+/* Auto Race page */
+#define IDC_COMBO_PROFILE   1080
+#define IDC_BTN_RACE_START  1081
+#define IDC_BTN_RACE_STOP   1082
+#define IDC_LBL_RACE_STATUS 1083
+#define IDC_LBL_RACE_STEP   1084
+#define IDC_LBL_RACE_LAPS   1085
+#define IDC_LBL_RACE_TIME   1086
+#define IDC_LBL_RACE_TIP    1087
 
 /* Tray icon */
 #define IDI_APP_ICON        200
@@ -77,6 +89,7 @@
 
 /* Hotkey ID */
 #define IDH_TOGGLE          4001
+#define IDH_AUTO_RACE       4002
 
 /* Custom messages */
 #define WM_TRAY_CALLBACK    (WM_USER + 1)

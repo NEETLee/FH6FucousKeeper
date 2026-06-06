@@ -6,6 +6,13 @@ EXPORTS
     Hook_GetStats
     Hook_ResetStats
     Hook_GetTarget
+    Hook_VKeyDown
+    Hook_VKeyUp
+    Hook_VKeyReleaseAll
+    Hook_VKeyIsDown
+    Hook_IsInputHooked
+    Hook_EnableInputHooks
+    Hook_DisableInputHooks
 
 SECTIONS
     FKShared READ WRITE SHARED

@@ -5,10 +5,9 @@
  * It subclasses the game window to intercept and neutralize focus-loss
  * messages, preventing the game from detecting window deactivation.
  *
- * Design Pattern: Chain of Responsibility (message filtering)
- * The SubclassProc acts as a filter chain, each message type is handled
- * by its own case, either modified or swallowed before reaching the
- * original window procedure.
+ * Additionally, it provides virtual input injection by hooking
+ * GetAsyncKeyState/GetKeyboardState in the game process's IAT,
+ * allowing the loader to simulate key presses via shared memory.
  */
 
 #ifndef HOOK_EXPORTS
@@ -20,8 +19,6 @@
  * This segment is shared between all instances of the DLL (loader process
  * and the injected copy in the game process). Allows cross-process
  * communication of state and statistics.
- *
- * For GCC/MinGW: use __attribute__((section, shared)) + .def file
  */
 #define SHARED __attribute__((section("FKShared"), shared))
 
@@ -36,14 +33,162 @@ static volatile LONG s_stat_activateapp SHARED = 0;
 static volatile LONG s_stat_ncactivate  SHARED = 0;
 static volatile LONG s_stat_activate    SHARED = 0;
 
+/* Virtual key bitmap: 256 keys, 1 bit each */
+static volatile BYTE s_virtual_keys[VK_BITMAP_SIZE] SHARED = {0};
+static volatile BOOL s_input_hooked SHARED = FALSE;
+
 /* ─── Per-Instance Data ───────────────────────────────────────────── */
 static HINSTANCE s_dll_instance = NULL;
 static WNDPROC   s_orig_wndproc = NULL;
 static BOOL      s_subclassed   = FALSE;
 
+/* IAT Hook state (per-process, not shared) */
+static SHORT (WINAPI *s_orig_GetAsyncKeyState)(int vKey) = NULL;
+static BOOL  (WINAPI *s_orig_GetKeyboardState)(PBYTE lpKeyState) = NULL;
+static SHORT (WINAPI *s_orig_GetKeyState)(int nVirtKey) = NULL;
+static BOOL  s_iat_installed = FALSE;
+
+/* ─── Virtual Key Helpers ────────────────────────────────────────── */
+
+static inline BOOL IsVKeyDown(int vk)
+{
+    if (vk < 0 || vk > 255) return FALSE;
+    return (s_virtual_keys[vk >> 3] & (1 << (vk & 7))) != 0;
+}
+
+/* ─── IAT Hook Implementation ────────────────────────────────────── */
+
+static SHORT WINAPI Hooked_GetAsyncKeyState(int vKey)
+{
+    if (IsVKeyDown(vKey)) {
+        return (SHORT)0x8001;
+    }
+    return s_orig_GetAsyncKeyState(vKey);
+}
+
+static SHORT WINAPI Hooked_GetKeyState(int nVirtKey)
+{
+    if (IsVKeyDown(nVirtKey)) {
+        return (SHORT)0xFF81;
+    }
+    return s_orig_GetKeyState(nVirtKey);
+}
+
+static BOOL WINAPI Hooked_GetKeyboardState(PBYTE lpKeyState)
+{
+    BOOL result = s_orig_GetKeyboardState(lpKeyState);
+    if (result && lpKeyState) {
+        for (int vk = 0; vk < 256; vk++) {
+            if (IsVKeyDown(vk)) {
+                lpKeyState[vk] = 0x80;
+            }
+        }
+    }
+    return result;
+}
+
+/*
+ * Patch a single IAT entry. Walks the import descriptor table of the
+ * given module and replaces the target function pointer.
+ */
+static BOOL PatchIAT(HMODULE hModule, const char *targetDll,
+                     const void *origFunc, const void *newFunc)
+{
+    if (!hModule || !origFunc || !newFunc) return FALSE;
+
+    BYTE *base = (BYTE *)hModule;
+    IMAGE_DOS_HEADER *dos = (IMAGE_DOS_HEADER *)base;
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return FALSE;
+
+    IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(base + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE) return FALSE;
+
+    IMAGE_DATA_DIRECTORY *importDir =
+        &nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    if (importDir->VirtualAddress == 0) return FALSE;
+
+    IMAGE_IMPORT_DESCRIPTOR *desc =
+        (IMAGE_IMPORT_DESCRIPTOR *)(base + importDir->VirtualAddress);
+
+    for (; desc->Name != 0; desc++) {
+        const char *dllName = (const char *)(base + desc->Name);
+        if (targetDll && _stricmp(dllName, targetDll) != 0) continue;
+
+        IMAGE_THUNK_DATA *thunk = (IMAGE_THUNK_DATA *)(base + desc->FirstThunk);
+        for (; thunk->u1.Function != 0; thunk++) {
+            if ((void *)(uintptr_t)thunk->u1.Function == origFunc) {
+                DWORD oldProtect;
+                if (VirtualProtect(&thunk->u1.Function, sizeof(void *),
+                                   PAGE_READWRITE, &oldProtect)) {
+                    thunk->u1.Function = (uintptr_t)newFunc;
+                    VirtualProtect(&thunk->u1.Function, sizeof(void *),
+                                   oldProtect, &oldProtect);
+                    return TRUE;
+                }
+            }
+        }
+    }
+    return FALSE;
+}
+
+static void InstallIATHooks(void)
+{
+    if (s_iat_installed) return;
+
+    HMODULE hGame = GetModuleHandle(NULL);
+    HMODULE hUser32 = GetModuleHandleA("user32.dll");
+    if (!hGame || !hUser32) return;
+
+    s_orig_GetAsyncKeyState = (SHORT (WINAPI *)(int))
+        GetProcAddress(hUser32, "GetAsyncKeyState");
+    s_orig_GetKeyState = (SHORT (WINAPI *)(int))
+        GetProcAddress(hUser32, "GetKeyState");
+    s_orig_GetKeyboardState = (BOOL (WINAPI *)(PBYTE))
+        GetProcAddress(hUser32, "GetKeyboardState");
+
+    if (s_orig_GetAsyncKeyState) {
+        PatchIAT(hGame, "user32.dll",
+                 s_orig_GetAsyncKeyState, Hooked_GetAsyncKeyState);
+    }
+    if (s_orig_GetKeyState) {
+        PatchIAT(hGame, "user32.dll",
+                 s_orig_GetKeyState, Hooked_GetKeyState);
+    }
+    if (s_orig_GetKeyboardState) {
+        PatchIAT(hGame, "user32.dll",
+                 s_orig_GetKeyboardState, Hooked_GetKeyboardState);
+    }
+
+    s_iat_installed = TRUE;
+    s_input_hooked = TRUE;
+}
+
+static void UninstallIATHooks(void)
+{
+    if (!s_iat_installed) return;
+
+    HMODULE hGame = GetModuleHandle(NULL);
+    if (!hGame) return;
+
+    if (s_orig_GetAsyncKeyState) {
+        PatchIAT(hGame, "user32.dll",
+                 Hooked_GetAsyncKeyState, s_orig_GetAsyncKeyState);
+    }
+    if (s_orig_GetKeyState) {
+        PatchIAT(hGame, "user32.dll",
+                 Hooked_GetKeyState, s_orig_GetKeyState);
+    }
+    if (s_orig_GetKeyboardState) {
+        PatchIAT(hGame, "user32.dll",
+                 Hooked_GetKeyboardState, s_orig_GetKeyboardState);
+    }
+
+    s_iat_installed = FALSE;
+    s_input_hooked = FALSE;
+}
+
 /* ─── Subclass Window Procedure ───────────────────────────────────────
  * Core filtering logic. Runs inside the game process.
- * Intercepts deactivation messages and either neutralizes or modifies them.
  */
 static LRESULT CALLBACK SubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
@@ -84,10 +229,19 @@ static LRESULT CALLBACK SubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
 
     case WM_HOOK_UNSUBCLASS:
         if (s_subclassed && s_orig_wndproc) {
+            UninstallIATHooks();
             SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)s_orig_wndproc);
             s_subclassed = FALSE;
             s_orig_wndproc = NULL;
         }
+        return 0;
+
+    case WM_HOOK_ENABLE_INPUT:
+        InstallIATHooks();
+        return s_iat_installed ? 1 : 0;
+
+    case WM_HOOK_DISABLE_INPUT:
+        UninstallIATHooks();
         return 0;
     }
 
@@ -128,6 +282,9 @@ BOOL APIENTRY DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
         break;
 
     case DLL_PROCESS_DETACH:
+        if (s_iat_installed) {
+            UninstallIATHooks();
+        }
         if (s_subclassed && s_orig_wndproc && s_target_hwnd) {
             SetWindowLongPtr(s_target_hwnd, GWLP_WNDPROC, (LONG_PTR)s_orig_wndproc);
             s_subclassed = FALSE;
@@ -171,16 +328,16 @@ HOOK_API void Hook_Uninstall(void)
 
     HWND target = s_target_hwnd;
 
-    /* Clear shared state FIRST to prevent HookProc from re-subclassing */
     s_target_hwnd = NULL;
     s_active = FALSE;
 
-    /* Now safely unsubclass the window */
+    /* Clear all virtual keys before unhooking */
+    memset((void *)s_virtual_keys, 0, VK_BITMAP_SIZE);
+
     if (target && IsWindow(target)) {
         SendMessage(target, WM_HOOK_UNSUBCLASS, 0, 0);
     }
 
-    /* Remove the hook after subclass is restored */
     if (s_hook_handle) {
         UnhookWindowsHookEx(s_hook_handle);
         s_hook_handle = NULL;
@@ -215,4 +372,46 @@ HOOK_API void Hook_ResetStats(void)
 HOOK_API HWND Hook_GetTarget(void)
 {
     return s_target_hwnd;
+}
+
+/* ─── Virtual Input API ──────────────────────────────────────────── */
+
+HOOK_API void Hook_VKeyDown(int vk)
+{
+    if (vk >= 0 && vk <= 255) {
+        s_virtual_keys[vk >> 3] |= (BYTE)(1 << (vk & 7));
+    }
+}
+
+HOOK_API void Hook_VKeyUp(int vk)
+{
+    if (vk >= 0 && vk <= 255) {
+        s_virtual_keys[vk >> 3] &= (BYTE)~(1 << (vk & 7));
+    }
+}
+
+HOOK_API void Hook_VKeyReleaseAll(void)
+{
+    memset((void *)s_virtual_keys, 0, VK_BITMAP_SIZE);
+}
+
+HOOK_API BOOL Hook_VKeyIsDown(int vk)
+{
+    return IsVKeyDown(vk);
+}
+
+HOOK_API BOOL Hook_IsInputHooked(void)
+{
+    return s_input_hooked;
+}
+
+HOOK_API BOOL Hook_EnableInputHooks(void)
+{
+    InstallIATHooks();
+    return s_iat_installed;
+}
+
+HOOK_API void Hook_DisableInputHooks(void)
+{
+    UninstallIATHooks();
 }

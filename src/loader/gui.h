@@ -58,4 +58,20 @@ void    Gui_ReadSettings(AppSettings *settings);
 /* Refresh all control text after language change */
 void    Gui_RefreshLanguage(BOOL hook_active, BOOL muted);
 
+/* Auto Race page: update status display */
+void    Gui_UpdateRaceStatus(const WCHAR *status, const WCHAR *step,
+                             int laps, DWORD elapsed_ms);
+
+/* Auto Race page: set running state (enable/disable buttons) */
+void    Gui_SetRaceRunning(BOOL running);
+
+/* Auto Race page: populate profile combo box */
+void    Gui_PopulateProfiles(const WCHAR names[][64], int count);
+
+/* Auto Race page: get currently selected profile filename */
+void    Gui_GetSelectedProfile(WCHAR *out, int max_len);
+
+/* Show update available notification next to repo link */
+void    Gui_ShowUpdateAvailable(const WCHAR *version, const WCHAR *url);
+
 #endif /* FOCUSKEEPER_GUI_H */

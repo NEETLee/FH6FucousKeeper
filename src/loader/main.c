@@ -30,6 +30,11 @@
 #include "audio_control.h"
 #include "i18n.h"
 #include "resource.h"
+#include "race_controller.h"
+#include "race_profile.h"
+#include "version_check.h"
+
+#define WM_VERSION_CHECK_DONE (WM_APP + 100)
 
 /* ─── Application State ───────────────────────────────────────────── */
 static struct {
@@ -55,6 +60,12 @@ static void DoRefreshWindowList(void);
 static void DoSelectWindow(int index);
 static void DoSaveSettings(void);
 static void UpdateStatsDisplay(void);
+static void DoToggleAutoRace(void);
+static void DoStartAutoRace(void);
+static void DoStopAutoRace(void);
+
+/* Race controller instance */
+static RaceController s_race_ctrl = {0};
 
 /* ─── Main Window Message Hook ────────────────────────────────────── */
 
@@ -82,6 +93,12 @@ static LRESULT CALLBACK AppWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
             return 0;
         case IDC_BTN_SAVE:      DoSaveSettings(); return 0;
 
+        case IDC_BTN_RACE_START: DoStartAutoRace(); return 0;
+        case IDC_BTN_RACE_STOP:  DoStopAutoRace(); return 0;
+
+        case IDC_COMBO_PROFILE:
+            return 0;
+
         case IDM_TRAY_SHOW:
             Gui_Show(TRUE);
             return 0;
@@ -107,15 +124,33 @@ static LRESULT CALLBACK AppWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
     case WM_HOTKEY:
         if (wParam == IDH_TOGGLE) {
             DoToggleHook();
+        } else if (wParam == IDH_AUTO_RACE) {
+            DoToggleAutoRace();
         }
         return 0;
 
     case WM_TIMER:
         if (wParam == IDT_STATS_UPDATE) {
             UpdateStatsDisplay();
+            /* Update race time display if running */
+            if (RaceCtrl_IsRunning(&s_race_ctrl)) {
+                AutoRaceStatus st;
+                RaceCtrl_GetStatus(&s_race_ctrl, &st);
+                Gui_UpdateRaceStatus(I18n_Get(STR_RACE_STATUS_RUNNING),
+                    st.step_name, st.lap_count, st.total_elapsed);
+            }
         } else if (wParam == IDT_AUTO_FIND) {
             if (!s_app.hook_active && s_app.game_hwnd == NULL) {
                 DoFindGame();
+            }
+        }
+        return 0;
+
+    case WM_VERSION_CHECK_DONE:
+        {
+            WCHAR ver[64] = {0}, url[256] = {0};
+            if (VersionCheck_GetResult(ver, 64, url, 256)) {
+                Gui_ShowUpdateAvailable(ver, url);
             }
         }
         return 0;
@@ -124,6 +159,7 @@ static LRESULT CALLBACK AppWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
         KillTimer(hwnd, IDT_STATS_UPDATE);
         KillTimer(hwnd, IDT_AUTO_FIND);
         UnregisterHotKey(hwnd, IDH_TOGGLE);
+        UnregisterHotKey(hwnd, IDH_AUTO_RACE);
         Tray_Destroy();
         break;
     }
@@ -145,6 +181,29 @@ static void OnLogEntry(const LogEntry *entry, void *user_data)
     Gui_AppendLog(line);
 }
 
+/* ─── Auto Race State Callback (Observer) ─────────────────────────── */
+
+static void OnAutoRaceStateChanged(AutoRaceState state, const WCHAR *message, void *user_data)
+{
+    (void)user_data;
+    (void)message;
+
+    switch (state) {
+    case AUTO_RACE_RUNNING:
+        Gui_SetRaceRunning(TRUE);
+        break;
+    case AUTO_RACE_IDLE:
+        Gui_SetRaceRunning(FALSE);
+        Gui_UpdateRaceStatus(I18n_Get(STR_RACE_STATUS_IDLE), NULL, 0, 0);
+        break;
+    case AUTO_RACE_ERROR:
+        Gui_SetRaceRunning(FALSE);
+        Gui_UpdateRaceStatus(I18n_Get(STR_RACE_STATUS_ERROR), NULL, 0, 0);
+        LOG_W(L"Auto race error: %s", message ? message : L"unknown");
+        break;
+    }
+}
+
 /* ─── Hook State Callback (Observer) ──────────────────────────────── */
 
 static void OnHookStateChanged(HookManagerState state, const WCHAR *message)
@@ -156,6 +215,10 @@ static void OnHookStateChanged(HookManagerState state, const WCHAR *message)
         s_app.hook_active = TRUE;
         Tray_SetState(TRAY_STATE_ACTIVE);
         Tray_ShowBalloon(L"FH6 FocusKeeper", I18n_Get(STR_STATUS_ACTIVE), NIIF_INFO);
+        /* Prevent system sleep if enabled */
+        if (s_app.settings.prevent_sleep) {
+            SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED);
+        }
         break;
     case HOOK_STATE_IDLE:
         s_app.hook_active = FALSE;
@@ -251,6 +314,13 @@ static void DoDisableHook(void)
 {
     if (!s_app.hook_active) return;
 
+    /* Stop auto race if running */
+    if (RaceCtrl_IsRunning(&s_race_ctrl)) {
+        RaceCtrl_Stop(&s_race_ctrl);
+        Gui_SetRaceRunning(FALSE);
+        LOG_I(L"%s", I18n_Get(STR_LOG_RACE_STOPPED));
+    }
+
     if (MsgReplay_IsActive()) {
         MsgReplay_Stop();
         LOG_I(L"%s", I18n_Get(STR_LOG_REPLAY_STOPPED));
@@ -263,6 +333,9 @@ static void DoDisableHook(void)
 
     s_app.hook_active = FALSE;
     OnHookStateChanged(HOOK_STATE_IDLE, L"");
+
+    /* Restore normal power state */
+    SetThreadExecutionState(ES_CONTINUOUS);
 }
 
 static void DoToggleHook(void)
@@ -320,10 +393,81 @@ static void DoSaveSettings(void)
     I18n_SetLanguage((Language)s_app.settings.language);
     Gui_RefreshLanguage(s_app.hook_active, s_app.game_muted);
 
+    /* Apply prevent_sleep change immediately if hook is active */
+    if (s_app.hook_active) {
+        if (s_app.settings.prevent_sleep) {
+            SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED);
+        } else {
+            SetThreadExecutionState(ES_CONTINUOUS);
+        }
+    }
+
     if (Settings_Save(&s_app.settings)) {
         LOG_I(L"%s", I18n_Get(STR_LOG_SETTINGS_SAVED));
     } else {
         LOG_E(L"Settings save failed");
+    }
+}
+
+static void DoStartAutoRace(void)
+{
+    if (!s_app.hook_active) {
+        /* Auto-enable anti-pause if not active */
+        DoEnableHook();
+        if (!s_app.hook_active) {
+            LOG_W(L"Cannot enable anti-pause, auto race aborted");
+            return;
+        }
+    }
+    if (RaceCtrl_IsRunning(&s_race_ctrl)) return;
+
+    /* Always reload profile from disk at start (user may have edited INI) */
+    {
+        WCHAR sel_name[PROFILE_NAME_LEN] = {0};
+        Gui_GetSelectedProfile(sel_name, PROFILE_NAME_LEN);
+
+        if (sel_name[0] == L'\0') {
+            WCHAR names[PROFILE_MAX_PROFILES][PROFILE_NAME_LEN];
+            int count = Profile_Enumerate(names, PROFILE_MAX_PROFILES);
+            if (count > 0)
+                wcsncpy(sel_name, names[0], PROFILE_NAME_LEN - 1);
+        }
+
+        if (sel_name[0] == L'\0') {
+            LOG_E(L"No profile available");
+            return;
+        }
+
+        if (!RaceCtrl_LoadProfile(&s_race_ctrl, sel_name)) {
+            LOG_E(L"Failed to load profile: %s", sel_name);
+            return;
+        }
+    }
+
+    if (RaceCtrl_Start(&s_race_ctrl, s_app.game_hwnd)) {
+        Gui_SetRaceRunning(TRUE);
+        LOG_I(L"%s", I18n_Get(STR_LOG_RACE_STARTED));
+    } else {
+        LOG_E(L"Auto race start failed");
+    }
+}
+
+static void DoStopAutoRace(void)
+{
+    if (!RaceCtrl_IsRunning(&s_race_ctrl)) return;
+
+    RaceCtrl_Stop(&s_race_ctrl);
+    Gui_SetRaceRunning(FALSE);
+    Gui_UpdateRaceStatus(I18n_Get(STR_RACE_STATUS_IDLE), NULL, 0, 0);
+    LOG_I(L"%s", I18n_Get(STR_LOG_RACE_STOPPED));
+}
+
+static void DoToggleAutoRace(void)
+{
+    if (RaceCtrl_IsRunning(&s_race_ctrl)) {
+        DoStopAutoRace();
+    } else {
+        DoStartAutoRace();
     }
 }
 
@@ -419,8 +563,37 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         LOG_I(L"%s", I18n_Get(STR_LOG_HOTKEY_REGISTERED));
     }
 
+    /* Register auto-race hotkey */
+    RegisterHotKey(hwnd_main, IDH_AUTO_RACE,
+                   s_app.settings.race_hotkey_mod, s_app.settings.race_hotkey_vk);
+
+    /* Initialize race controller with callback */
+    if (!RaceCtrl_Init(&s_race_ctrl, OnAutoRaceStateChanged, NULL)) {
+        LOG_W(L"Race controller init failed");
+    }
+
+    /* Load race profiles list into combo */
+    {
+        WCHAR profile_names[PROFILE_MAX_PROFILES][PROFILE_NAME_LEN];
+        int count = Profile_Enumerate(profile_names, PROFILE_MAX_PROFILES);
+        if (count == 0) {
+            /* Generate default template if no profiles exist */
+            WCHAR def_path[MAX_PATH];
+            _snwprintf(def_path, MAX_PATH, L"%s%s",
+                       Profile_GetDirectory(), L"170516901.ini");
+            Profile_WriteDefaultTemplate(def_path);
+            count = Profile_Enumerate(profile_names, PROFILE_MAX_PROFILES);
+        }
+        if (count > 0) {
+            Gui_PopulateProfiles(profile_names, count);
+        }
+    }
+
     /* Set up timers */
     SetTimer(hwnd_main, IDT_STATS_UPDATE, 500, NULL);
+
+    /* Check for new version in background */
+    VersionCheck_Start(hwnd_main, WM_VERSION_CHECK_DONE);
 
     if (s_app.settings.auto_find) {
         SetTimer(hwnd_main, IDT_AUTO_FIND, 3000, NULL);
@@ -448,12 +621,19 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     }
 
 cleanup:
+    /* Shutdown race controller */
+    RaceCtrl_Shutdown(&s_race_ctrl);
+
     if (s_app.game_muted && s_app.game_pid) {
         AudioCtrl_MuteProcess(s_app.game_pid, FALSE);
     }
     AudioCtrl_Shutdown();
     HookMgr_Shutdown();
     MsgReplay_Stop();
+
+    /* Restore normal power state */
+    SetThreadExecutionState(ES_CONTINUOUS);
+
     Logger_Shutdown();
 
     if (hMutex) {

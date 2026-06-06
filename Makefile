@@ -20,7 +20,7 @@ CFLAGS += -Wno-cast-function-type
 
 # Linker flags
 LDFLAGS_DLL = -shared -Wl,--out-implib,build/libhook.a
-LDFLAGS_EXE = -mwindows -L./build -lhook -lcomctl32 -lpsapi -lole32 -loleaut32
+LDFLAGS_EXE = -mwindows -L./build -lhook -lcomctl32 -lpsapi -lole32 -loleaut32 -lgdi32 -lwinhttp
 
 # Directories
 SRC_HOOK = src/hook
@@ -40,7 +40,14 @@ LOADER_SRC = $(SRC_LOADER)/main.c \
              $(SRC_LOADER)/logger.c \
              $(SRC_LOADER)/settings.c \
              $(SRC_LOADER)/audio_control.c \
-             $(SRC_LOADER)/i18n.c
+             $(SRC_LOADER)/i18n.c \
+             $(SRC_LOADER)/input_hook_backend.c \
+             $(SRC_LOADER)/step_executor.c \
+             $(SRC_LOADER)/race_profile.c \
+             $(SRC_LOADER)/auto_race.c \
+             $(SRC_LOADER)/race_controller.c \
+             $(SRC_LOADER)/screen_detect.c \
+             $(SRC_LOADER)/version_check.c
 
 # Output
 DLL_OUT = $(BUILD_DIR)/hook.dll

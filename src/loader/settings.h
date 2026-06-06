@@ -22,7 +22,13 @@ typedef struct {
     BOOL        auto_start;         /* Start with Windows */
     BOOL        log_to_file;        /* Enable file logging */
     BOOL        start_minimized;    /* Start minimized to tray */
+    BOOL        prevent_sleep;      /* Prevent system sleep while hook is active */
     int         language;           /* 0=Auto, 1=Chinese, 2=English */
+
+    /* Auto Race settings */
+    WCHAR       race_profile[64];   /* Current profile filename */
+    DWORD       race_hotkey_mod;    /* Auto-race hotkey modifiers */
+    DWORD       race_hotkey_vk;     /* Auto-race hotkey virtual key */
 } AppSettings;
 
 /* ─── Public API ──────────────────────────────────────────────────── */

@@ -31,7 +31,7 @@ static UINT s_dpi = 96;
 static struct {
     HWND        hwnd_main;
     HWND        hwnd_tab;
-    HWND        pages[4];       /* Status, Windows, Log, Settings */
+    HWND        pages[5];       /* Status, Windows, Log, Settings, AutoRace */
     int         current_page;
     HINSTANCE   hInstance;
     HFONT       hFont;
@@ -58,8 +58,19 @@ static struct {
     HWND        hwnd_chk_autofind;
     HWND        hwnd_chk_tray;
     HWND        hwnd_chk_logfile;
+    HWND        hwnd_chk_prevent_sleep;
     HWND        hwnd_edit_interval;
     HWND        hwnd_btn_save;
+    HWND        hwnd_lbl_update;
+
+    /* Auto Race page */
+    HWND        hwnd_combo_profile;
+    HWND        hwnd_btn_race_start;
+    HWND        hwnd_btn_race_stop;
+    HWND        hwnd_lbl_race_status;
+    HWND        hwnd_lbl_race_step;
+    HWND        hwnd_lbl_race_laps;
+    HWND        hwnd_lbl_race_time;
 
     /* Footer font and brush */
     HFONT       hFontFooter;
@@ -76,6 +87,7 @@ static void CreateStatusPage(HWND parent);
 static void CreateWindowListPage(HWND parent);
 static void CreateLogPage(HWND parent);
 static void CreateSettingsPage(HWND parent);
+static void CreateAutoRacePage(HWND parent);
 static void SwitchPage(int index);
 static void LayoutPages(void);
 static BOOL RegisterPanelClass(HINSTANCE hInstance);
@@ -257,6 +269,7 @@ HWND Gui_Create(const GuiContext *ctx)
     CreateWindowListPage(s_gui.hwnd_main);
     CreateLogPage(s_gui.hwnd_main);
     CreateSettingsPage(s_gui.hwnd_main);
+    CreateAutoRacePage(s_gui.hwnd_main);
 
     LayoutPages();
     SwitchPage(0);
@@ -417,6 +430,8 @@ void Gui_ReadSettings(AppSettings *settings)
         settings->minimize_to_tray = (SendMessage(s_gui.hwnd_chk_tray, BM_GETCHECK, 0, 0) == BST_CHECKED);
     if (s_gui.hwnd_chk_logfile)
         settings->log_to_file = (SendMessage(s_gui.hwnd_chk_logfile, BM_GETCHECK, 0, 0) == BST_CHECKED);
+    if (s_gui.hwnd_chk_prevent_sleep)
+        settings->prevent_sleep = (SendMessage(s_gui.hwnd_chk_prevent_sleep, BM_GETCHECK, 0, 0) == BST_CHECKED);
 
     /* Language radio (on settings page = pages[3]) */
     HWND page = s_gui.pages[3];
@@ -452,6 +467,8 @@ void Gui_RefreshLanguage(BOOL hook_active, BOOL muted)
         TabCtrl_SetItem(s_gui.hwnd_tab, 2, &tci);
         tci.pszText = (LPWSTR)I18n_Get(STR_TAB_SETTINGS);
         TabCtrl_SetItem(s_gui.hwnd_tab, 3, &tci);
+        tci.pszText = (LPWSTR)I18n_Get(STR_TAB_AUTO_RACE);
+        TabCtrl_SetItem(s_gui.hwnd_tab, 4, &tci);
     }
 
     /* Status page */
@@ -506,6 +523,8 @@ void Gui_RefreshLanguage(BOOL hook_active, BOOL muted)
         SetWindowTextW(s_gui.hwnd_chk_tray, I18n_Get(STR_SETTINGS_TRAY));
     if (s_gui.hwnd_chk_logfile)
         SetWindowTextW(s_gui.hwnd_chk_logfile, I18n_Get(STR_SETTINGS_LOGFILE));
+    if (s_gui.hwnd_chk_prevent_sleep)
+        SetWindowTextW(s_gui.hwnd_chk_prevent_sleep, I18n_Get(STR_SETTINGS_PREVENT_SLEEP));
     if (s_gui.hwnd_btn_save)
         SetWindowTextW(s_gui.hwnd_btn_save, I18n_Get(STR_BTN_SAVE));
 
@@ -560,6 +579,9 @@ static void CreateTabControl(HWND parent)
 
     tci.pszText = (LPWSTR)I18n_Get(STR_TAB_SETTINGS);
     TabCtrl_InsertItem(s_gui.hwnd_tab, 3, &tci);
+
+    tci.pszText = (LPWSTR)I18n_Get(STR_TAB_AUTO_RACE);
+    TabCtrl_InsertItem(s_gui.hwnd_tab, 4, &tci);
 }
 
 /* ─── Status Page ─────────────────────────────────────────────────── */
@@ -703,6 +725,10 @@ static void CreateSettingsPage(HWND parent)
 
     s_gui.hwnd_chk_logfile = CreateCtrl(L"BUTTON", I18n_Get(STR_SETTINGS_LOGFILE),
         BS_AUTOCHECKBOX, m + S(10), y, S(300), S(20), page, IDC_CHK_LOGFILE);
+    y += S(26);
+
+    s_gui.hwnd_chk_prevent_sleep = CreateCtrl(L"BUTTON", I18n_Get(STR_SETTINGS_PREVENT_SLEEP),
+        BS_AUTOCHECKBOX, m + S(10), y, S(300), S(20), page, IDC_CHK_PREVENT_SLEEP);
 
     y += S(36);
     CreateCtrl(L"STATIC", I18n_Get(STR_SETTINGS_LANGUAGE), SS_LEFT, m, y, S(80), S(20), page, IDC_LBL_LANGUAGE);
@@ -723,6 +749,12 @@ static void CreateSettingsPage(HWND parent)
             0, m, S(318), S(420), S(16), page, IDC_LBL_ABOUT_REPO);
         if (hRepo && s_gui.hFontFooter)
             SendMessage(hRepo, WM_SETFONT, (WPARAM)s_gui.hFontFooter, TRUE);
+
+        s_gui.hwnd_lbl_update = CreateCtrl(L"SysLink", L"",
+            0, m, S(336), S(420), S(16), page, IDC_LBL_UPDATE);
+        if (s_gui.hwnd_lbl_update && s_gui.hFontFooter)
+            SendMessage(s_gui.hwnd_lbl_update, WM_SETFONT, (WPARAM)s_gui.hFontFooter, TRUE);
+        ShowWindow(s_gui.hwnd_lbl_update, SW_HIDE);
     }
 
     /* Apply current settings to controls */
@@ -737,6 +769,8 @@ static void CreateSettingsPage(HWND parent)
             s_gui.settings->minimize_to_tray ? BST_CHECKED : BST_UNCHECKED, 0);
         SendMessage(s_gui.hwnd_chk_logfile, BM_SETCHECK,
             s_gui.settings->log_to_file ? BST_CHECKED : BST_UNCHECKED, 0);
+        SendMessage(s_gui.hwnd_chk_prevent_sleep, BM_SETCHECK,
+            s_gui.settings->prevent_sleep ? BST_CHECKED : BST_UNCHECKED, 0);
 
         /* Language radio buttons */
         HWND lang_btn;
@@ -747,6 +781,51 @@ static void CreateSettingsPage(HWND parent)
         }
         if (lang_btn) SendMessage(lang_btn, BM_SETCHECK, BST_CHECKED, 0);
     }
+}
+
+/* ─── Auto Race Page ──────────────────────────────────────────────── */
+
+static void CreateAutoRacePage(HWND parent)
+{
+    int m = S(CTRL_MARGIN);
+    int y = S(10);
+    HWND page = CreateWindowExW(0, PANEL_CLASS, L"",
+        WS_CHILD | WS_CLIPCHILDREN,
+        0, 0, 0, 0, parent, NULL, s_gui.hInstance, NULL);
+    s_gui.pages[4] = page;
+
+    /* Profile selector */
+    CreateCtrl(L"STATIC", I18n_Get(STR_RACE_PROFILE), SS_LEFT,
+        m, y, S(80), S(20), page, 0);
+    s_gui.hwnd_combo_profile = CreateCtrlEx(0, L"COMBOBOX", L"",
+        CBS_DROPDOWNLIST | WS_VSCROLL,
+        S(95), y - S(2), S(320), S(200), page, IDC_COMBO_PROFILE);
+    y += S(34);
+
+    /* Start / Stop buttons */
+    s_gui.hwnd_btn_race_start = CreateCtrl(L"BUTTON", I18n_Get(STR_RACE_BTN_START),
+        BS_PUSHBUTTON, m, y, S(140), S(28), page, IDC_BTN_RACE_START);
+    s_gui.hwnd_btn_race_stop = CreateCtrl(L"BUTTON", I18n_Get(STR_RACE_BTN_STOP),
+        BS_PUSHBUTTON, m + S(150), y, S(140), S(28), page, IDC_BTN_RACE_STOP);
+    EnableWindow(s_gui.hwnd_btn_race_stop, FALSE);
+    y += S(40);
+
+    /* Status display */
+    s_gui.hwnd_lbl_race_status = CreateCtrl(L"STATIC", I18n_Get(STR_RACE_STATUS_IDLE),
+        SS_LEFT, m, y, S(400), S(20), page, IDC_LBL_RACE_STATUS);
+    y += S(24);
+
+    s_gui.hwnd_lbl_race_step = CreateCtrl(L"STATIC", L"",
+        SS_LEFT, m, y, S(400), S(20), page, IDC_LBL_RACE_STEP);
+    y += S(24);
+
+    s_gui.hwnd_lbl_race_laps = CreateCtrl(L"STATIC", L"",
+        SS_LEFT, m, y, S(400), S(20), page, IDC_LBL_RACE_LAPS);
+    y += S(24);
+
+    s_gui.hwnd_lbl_race_time = CreateCtrl(L"STATIC", L"",
+        SS_LEFT, m, y, S(400), S(20), page, IDC_LBL_RACE_TIME);
+    y += S(36);
 }
 
 /* ─── Page Layout and Switching ───────────────────────────────────── */
@@ -763,7 +842,7 @@ static void LayoutPages(void)
     /* Convert to parent coordinates */
     MapWindowPoints(s_gui.hwnd_tab, s_gui.hwnd_main, (POINT *)&rc, 2);
 
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 5; i++) {
         if (s_gui.pages[i]) {
             SetWindowPos(s_gui.pages[i], NULL,
                 rc.left, rc.top,
@@ -775,14 +854,96 @@ static void LayoutPages(void)
 
 static void SwitchPage(int index)
 {
-    if (index < 0 || index > 3) return;
+    if (index < 0 || index > 4) return;
 
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 5; i++) {
         if (s_gui.pages[i]) {
             ShowWindow(s_gui.pages[i], (i == index) ? SW_SHOW : SW_HIDE);
         }
     }
     s_gui.current_page = index;
+}
+
+/* ─── Auto Race Page Public API ──────────────────────────────────── */
+
+void Gui_UpdateRaceStatus(const WCHAR *status, const WCHAR *step,
+                          int laps, DWORD elapsed_ms)
+{
+    WCHAR buf[128];
+
+    if (s_gui.hwnd_lbl_race_status && status)
+        SetWindowTextW(s_gui.hwnd_lbl_race_status, status);
+
+    if (s_gui.hwnd_lbl_race_step) {
+        if (step) {
+            _snwprintf(buf, 127, L"%s%s", I18n_Get(STR_RACE_STEP), step);
+            SetWindowTextW(s_gui.hwnd_lbl_race_step, buf);
+        } else {
+            SetWindowTextW(s_gui.hwnd_lbl_race_step, L"");
+        }
+    }
+
+    if (s_gui.hwnd_lbl_race_laps) {
+        _snwprintf(buf, 127, L"%s%d", I18n_Get(STR_RACE_LAPS), laps);
+        SetWindowTextW(s_gui.hwnd_lbl_race_laps, buf);
+    }
+
+    if (s_gui.hwnd_lbl_race_time) {
+        DWORD sec = elapsed_ms / 1000;
+        DWORD min = sec / 60;
+        DWORD hr = min / 60;
+        _snwprintf(buf, 127, L"%s%02lu:%02lu:%02lu",
+            I18n_Get(STR_RACE_TIME), hr, min % 60, sec % 60);
+        SetWindowTextW(s_gui.hwnd_lbl_race_time, buf);
+    }
+}
+
+void Gui_SetRaceRunning(BOOL running)
+{
+    if (s_gui.hwnd_btn_race_start)
+        EnableWindow(s_gui.hwnd_btn_race_start, !running);
+    if (s_gui.hwnd_btn_race_stop)
+        EnableWindow(s_gui.hwnd_btn_race_stop, running);
+    if (s_gui.hwnd_combo_profile)
+        EnableWindow(s_gui.hwnd_combo_profile, !running);
+}
+
+void Gui_PopulateProfiles(const WCHAR names[][64], int count)
+{
+    if (!s_gui.hwnd_combo_profile) return;
+
+    SendMessage(s_gui.hwnd_combo_profile, CB_RESETCONTENT, 0, 0);
+    for (int i = 0; i < count; i++) {
+        SendMessageW(s_gui.hwnd_combo_profile, CB_ADDSTRING, 0, (LPARAM)names[i]);
+    }
+    if (count > 0) {
+        SendMessage(s_gui.hwnd_combo_profile, CB_SETCURSEL, 0, 0);
+    }
+}
+
+void Gui_GetSelectedProfile(WCHAR *out, int max_len)
+{
+    if (!out || max_len <= 0) return;
+    out[0] = L'\0';
+
+    if (!s_gui.hwnd_combo_profile) return;
+
+    int sel = (int)SendMessage(s_gui.hwnd_combo_profile, CB_GETCURSEL, 0, 0);
+    if (sel >= 0) {
+        SendMessageW(s_gui.hwnd_combo_profile, CB_GETLBTEXT, sel, (LPARAM)out);
+    }
+}
+
+void Gui_ShowUpdateAvailable(const WCHAR *version, const WCHAR *url)
+{
+    if (!s_gui.hwnd_lbl_update || !version || !url) return;
+
+    WCHAR text[512];
+    _snwprintf(text, 512,
+        L"\x26a0 <a href=\"%s\">\u65b0\u7248\u672c %s \u53ef\u7528</a>", url, version);
+
+    SetWindowTextW(s_gui.hwnd_lbl_update, text);
+    ShowWindow(s_gui.hwnd_lbl_update, SW_SHOW);
 }
 
 /* ─── Window Procedure ────────────────────────────────────────────── */
@@ -800,6 +961,12 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
             (nmhdr->code == NM_CLICK || nmhdr->code == NM_RETURN)) {
             ShellExecuteW(NULL, L"open",
                 L"https://github.com/NEETLee/FH6FucousKeeper", NULL, NULL, SW_SHOWNORMAL);
+        }
+        if (nmhdr->idFrom == IDC_LBL_UPDATE &&
+            (nmhdr->code == NM_CLICK || nmhdr->code == NM_RETURN)) {
+            NMLINK *link = (NMLINK *)lParam;
+            if (link->item.szUrl[0])
+                ShellExecuteW(NULL, L"open", link->item.szUrl, NULL, NULL, SW_SHOWNORMAL);
         }
         break;
     }
