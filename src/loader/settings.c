@@ -6,7 +6,6 @@
  */
 
 #include "settings.h"
-#include "msg_replay.h"
 #include <stdio.h>
 #include <wchar.h>
 
@@ -52,7 +51,6 @@ void Settings_Default(AppSettings *settings)
     if (!settings) return;
 
     settings->game_version     = GAME_VERSION_AUTO;
-    settings->replay_interval  = MSG_REPLAY_DEFAULT_INTERVAL;
     settings->hotkey_modifiers = DEFAULT_HOTKEY_MOD;
     settings->hotkey_vk        = DEFAULT_HOTKEY_VK;
     settings->auto_find        = TRUE;
@@ -84,7 +82,6 @@ BOOL Settings_Load(AppSettings *settings)
     }
 
     settings->game_version     = (GameVersion)ReadInt(INI_SECTION_GENERAL, L"GameVersion", GAME_VERSION_AUTO);
-    settings->replay_interval  = (DWORD)ReadInt(INI_SECTION_GENERAL, L"ReplayInterval", MSG_REPLAY_DEFAULT_INTERVAL);
     settings->auto_find        = (BOOL)ReadInt(INI_SECTION_GENERAL, L"AutoFind", TRUE);
     settings->log_to_file      = (BOOL)ReadInt(INI_SECTION_GENERAL, L"LogToFile", TRUE);
     settings->prevent_sleep    = (BOOL)ReadInt(INI_SECTION_GENERAL, L"PreventSleep", TRUE);
@@ -105,10 +102,6 @@ BOOL Settings_Load(AppSettings *settings)
     settings->race_hotkey_mod  = (DWORD)ReadInt(INI_SECTION_AUTORACE, L"HotkeyModifiers", MOD_CONTROL);
     settings->race_hotkey_vk   = (DWORD)ReadInt(INI_SECTION_AUTORACE, L"HotkeyVK", VK_F11);
 
-    /* Validate replay interval */
-    if (settings->replay_interval < 10) settings->replay_interval = 10;
-    if (settings->replay_interval > 1000) settings->replay_interval = 1000;
-
     return TRUE;
 }
 
@@ -119,7 +112,6 @@ BOOL Settings_Save(const AppSettings *settings)
     EnsureIniPath();
 
     WriteInt(INI_SECTION_GENERAL, L"GameVersion",     (int)settings->game_version);
-    WriteInt(INI_SECTION_GENERAL, L"ReplayInterval",  (int)settings->replay_interval);
     WriteInt(INI_SECTION_GENERAL, L"AutoFind",        (int)settings->auto_find);
     WriteInt(INI_SECTION_GENERAL, L"LogToFile",       (int)settings->log_to_file);
     WriteInt(INI_SECTION_GENERAL, L"PreventSleep",    (int)settings->prevent_sleep);

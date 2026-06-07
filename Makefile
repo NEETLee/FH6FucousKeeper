@@ -36,7 +36,6 @@ LOADER_SRC = $(SRC_LOADER)/main.c \
              $(SRC_LOADER)/tray.c \
              $(SRC_LOADER)/hook_manager.c \
              $(SRC_LOADER)/window_finder.c \
-             $(SRC_LOADER)/msg_replay.c \
              $(SRC_LOADER)/logger.c \
              $(SRC_LOADER)/settings.c \
              $(SRC_LOADER)/audio_control.c \
@@ -58,10 +57,14 @@ RES_OBJ = $(BUILD_DIR)/app_res.o
 
 .PHONY: all clean rebuild dll exe dirs
 
-all: dirs dll exe
+all: dirs dll exe profiles
 
 dirs:
 	@mkdir -p $(BUILD_DIR)
+
+profiles: dirs
+	@mkdir -p $(BUILD_DIR)/profiles
+	@cp -n data/profiles/*.ini $(BUILD_DIR)/profiles/ 2>/dev/null || true
 
 dll: dirs $(DLL_OUT)
 

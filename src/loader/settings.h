@@ -14,7 +14,6 @@
 /* Application settings structure */
 typedef struct {
     GameVersion game_version;       /* Auto/Steam/Store */
-    DWORD       replay_interval;    /* Message replay interval (ms) */
     DWORD       hotkey_modifiers;   /* MOD_CONTROL | MOD_ALT etc. */
     DWORD       hotkey_vk;          /* Virtual key code */
     BOOL        auto_find;          /* Auto-find game window on start */
@@ -23,7 +22,7 @@ typedef struct {
     BOOL        log_to_file;        /* Enable file logging */
     BOOL        start_minimized;    /* Start minimized to tray */
     BOOL        prevent_sleep;      /* Prevent system sleep while hook is active */
-    int         language;           /* 0=Auto, 1=Chinese, 2=English */
+    int         language;           /* 0=Auto, 1=SimplifiedChinese, 2=English, 3=TraditionalChinese */
 
     /* Auto Race settings */
     WCHAR       race_profile[64];   /* Current profile filename */

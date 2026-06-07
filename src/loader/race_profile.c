@@ -11,6 +11,9 @@
 
 static WCHAR s_profiles_dir[MAX_PATH] = {0};
 
+/* Forward declarations for encoding support */
+static void EnsureIniEncoding(const WCHAR *path);
+
 /* ─── Internal Helpers ────────────────────────────────────────────── */
 
 static void EnsureProfilesDir(void)
@@ -79,6 +82,8 @@ BOOL Profile_Load(const WCHAR *ini_path, RaceProfile *out)
 
     if (GetFileAttributesW(ini_path) == INVALID_FILE_ATTRIBUTES)
         return FALSE;
+
+    EnsureIniEncoding(ini_path);
 
     ZeroMemory(out, sizeof(RaceProfile));
 
@@ -227,74 +232,191 @@ int Profile_Enumerate(WCHAR names[][PROFILE_NAME_LEN], int max_count)
     return count;
 }
 
-/* Write the default profile with full Chinese documentation */
+/* ─── Encoding Detection ──────────────────────────────────────────── */
+
+typedef enum { ENC_UTF16LE, ENC_UTF8, ENC_ANSI } FileEncoding;
+
+static BOOL IsValidUtf8(const unsigned char *data, DWORD size)
+{
+    DWORD i = 0;
+    int non_ascii = 0;
+    while (i < size) {
+        unsigned char c = data[i];
+        int extra = 0;
+        if (c < 0x80) { i++; continue; }
+        else if ((c & 0xE0) == 0xC0) extra = 1;
+        else if ((c & 0xF0) == 0xE0) extra = 2;
+        else if ((c & 0xF8) == 0xF0) extra = 3;
+        else return FALSE;
+        i++;
+        for (int j = 0; j < extra; j++) {
+            if (i >= size || (data[i] & 0xC0) != 0x80) return FALSE;
+            i++;
+        }
+        non_ascii++;
+    }
+    return non_ascii > 0;
+}
+
+static FileEncoding DetectEncoding(const unsigned char *data, DWORD size)
+{
+    if (size >= 2 && data[0] == 0xFF && data[1] == 0xFE)
+        return ENC_UTF16LE;
+    if (size >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF)
+        return ENC_UTF8;
+    if (IsValidUtf8(data, min(size, 4096)))
+        return ENC_UTF8;
+    return ENC_ANSI;
+}
+
+static WCHAR* ReadFileToWideString(const WCHAR *path, int *out_len)
+{
+    HANDLE hFile = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL,
+                               OPEN_EXISTING, 0, NULL);
+    if (hFile == INVALID_HANDLE_VALUE) return NULL;
+
+    DWORD size = GetFileSize(hFile, NULL);
+    if (size == 0 || size == INVALID_FILE_SIZE) { CloseHandle(hFile); return NULL; }
+
+    unsigned char *raw = (unsigned char *)malloc(size);
+    if (!raw) { CloseHandle(hFile); return NULL; }
+
+    DWORD read_bytes;
+    if (!ReadFile(hFile, raw, size, &read_bytes, NULL)) {
+        free(raw); CloseHandle(hFile); return NULL;
+    }
+    CloseHandle(hFile);
+
+    WCHAR *result = NULL;
+    int wlen = 0;
+    FileEncoding enc = DetectEncoding(raw, read_bytes);
+
+    switch (enc) {
+    case ENC_UTF16LE: {
+        const WCHAR *src = (const WCHAR *)(raw + 2);
+        wlen = (int)((read_bytes - 2) / sizeof(WCHAR));
+        result = (WCHAR *)malloc((wlen + 1) * sizeof(WCHAR));
+        if (result) { memcpy(result, src, wlen * sizeof(WCHAR)); result[wlen] = L'\0'; }
+        break;
+    }
+    case ENC_UTF8: {
+        const char *src = (const char *)raw;
+        int skip = (read_bytes >= 3 && raw[0] == 0xEF && raw[1] == 0xBB && raw[2] == 0xBF) ? 3 : 0;
+        wlen = MultiByteToWideChar(CP_UTF8, 0, src + skip, read_bytes - skip, NULL, 0);
+        result = (WCHAR *)malloc((wlen + 1) * sizeof(WCHAR));
+        if (result) {
+            MultiByteToWideChar(CP_UTF8, 0, src + skip, read_bytes - skip, result, wlen);
+            result[wlen] = L'\0';
+        }
+        break;
+    }
+    case ENC_ANSI: {
+        wlen = MultiByteToWideChar(CP_ACP, 0, (const char *)raw, read_bytes, NULL, 0);
+        result = (WCHAR *)malloc((wlen + 1) * sizeof(WCHAR));
+        if (result) {
+            MultiByteToWideChar(CP_ACP, 0, (const char *)raw, read_bytes, result, wlen);
+            result[wlen] = L'\0';
+        }
+        break;
+    }
+    }
+
+    free(raw);
+    if (out_len) *out_len = wlen;
+    return result;
+}
+
+/*
+ * Ensure INI file has UTF-16LE BOM so GetPrivateProfileStringW can read it.
+ * If file is UTF-8 or ANSI without BOM, convert in-place to UTF-16LE.
+ */
+static void EnsureIniEncoding(const WCHAR *path)
+{
+    HANDLE hFile = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL,
+                               OPEN_EXISTING, 0, NULL);
+    if (hFile == INVALID_HANDLE_VALUE) return;
+
+    unsigned char bom[3] = {0};
+    DWORD read_bytes;
+    ReadFile(hFile, bom, 3, &read_bytes, NULL);
+    CloseHandle(hFile);
+
+    if (read_bytes >= 2 && bom[0] == 0xFF && bom[1] == 0xFE)
+        return;
+
+    int wlen = 0;
+    WCHAR *wide = ReadFileToWideString(path, &wlen);
+    if (!wide || wlen == 0) { free(wide); return; }
+
+    hFile = CreateFileW(path, GENERIC_WRITE, 0, NULL,
+                        CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hFile == INVALID_HANDLE_VALUE) { free(wide); return; }
+
+    unsigned char utf16bom[2] = {0xFF, 0xFE};
+    DWORD written;
+    WriteFile(hFile, utf16bom, 2, &written, NULL);
+    WriteFile(hFile, wide, wlen * sizeof(WCHAR), &written, NULL);
+    CloseHandle(hFile);
+    free(wide);
+}
+
+/* ─── Public API ── Profile Template ──────────────────────────────── */
+
+/* Copy the bundled default profile template (from exe's directory) to the profiles dir */
 BOOL Profile_WriteDefaultTemplate(const WCHAR *path)
 {
-    FILE *f = _wfopen(path, L"w, ccs=UTF-16LE");
-    if (!f) return FALSE;
+    WCHAR src_path[MAX_PATH];
+    GetModuleFileNameW(NULL, src_path, MAX_PATH);
+    WCHAR *slash = wcsrchr(src_path, L'\\');
+    if (slash) *(slash + 1) = L'\0';
+    wcscat(src_path, L"profiles\\170516901.ini");
 
-    fwprintf(f,
-        L"; ===================================================================\n"
-        L"; FH6 FocusKeeper - \u81ea\u52a8\u8d5b\u4e8b\u914d\u7f6e\u6587\u4ef6\n"
-        L"; ===================================================================\n"
-        L";\n"
-        L"; \u4f5c\u8005: 170516901\n"
-        L"; \u89c6\u9891: \u3010\u5730\u5e73\u7ebf6 13\u79d210\u6280\u672f\u70b9\u3011\n"
-        L";   https://www.bilibili.com/video/BV1PzV26gEwM/?share_source=copy_web&vd_source=7bf46fa0cbbf72f4c209cd0991698a2a\n"
-        L";\n"
-        L"; ===================================================================\n"
-        L";\n"
-        L"; Mode=xxx         \u6a21\u5f0f: wait(\u7b49\u5f85) / hold(\u6309\u4f4f) / tap(\u70b9\u6309) / sequence(\u5e8f\u5217)\n"
-        L"; Name=xxx         \u6b65\u9aa4\u540d\u79f0(\u53ef\u9009\uff0c\u663e\u793a\u5728\u8fd0\u884c\u72b6\u6001\u4e2d)\n"
-        L"; Duration=\u6beb\u79d2    \u8fd9\u4e00\u6b65\u7684\u603b\u6301\u7eed\u65f6\u95f4\n"
-        L"; DelayBefore=\u6beb\u79d2 \u5f00\u59cb\u524d\u7b49\u5f85\u7684\u65f6\u95f4(\u53ef\u9009\uff0c\u9ed8\u8ba40)\n"
-        L";\n"
-        L"; Mode=hold        Key=\u952e\u7801\n"
-        L"; Mode=tap         Key=\u952e\u7801, HoldMs=\u6309\u4f4f\u65f6\u957f, Interval=\u95f4\u9694\n"
-        L"; Mode=sequence    ActionCount, A0_Key/Hold/Delay...\n"
-        L";\n"
-        L"; \u5e38\u7528\u952e\u7801: W=87 A=65 S=83 D=68 X=88 E=69 Enter=13 Esc=27 Space=32\n"
-        L"; \u65f6\u95f4: 1\u79d2=1000  5\u79d2=5000  17\u79d2=17000\n"
-        L";\n"
-        L"; \u6d41\u7a0b: \u6309X(1\u79d2) -> \u56de\u8f66(10\u79d2) -> \u56de\u8f66(5\u79d2) -> \u6309\u4f4fW(20\u79d2) -> \u5faa\u73af\n"
-        L";\n"
-        L"; ===================================================================\n"
-        L"\n"
-        L"[Profile]\n"
-        L"Name=170516901\n"
-        L"StepCount=4\n"
-        L"\n"
-        L"[Step0]\n"
-        L"Name=\u9009\u62e9\u91cd\u8d5b\n"
-        L"Mode=tap\n"
-        L"Duration=1000\n"
-        L"Key=88\n"
-        L"HoldMs=80\n"
-        L"Interval=2000\n"
-        L"\n"
-        L"[Step1]\n"
-        L"Name=\u786e\u8ba41\n"
-        L"Mode=tap\n"
-        L"Duration=10000\n"
-        L"Key=13\n"
-        L"HoldMs=80\n"
-        L"Interval=6000\n"
-        L"\n"
-        L"[Step2]\n"
-        L"Name=\u786e\u8ba42\n"
-        L"Mode=tap\n"
-        L"Duration=5000\n"
-        L"Key=13\n"
-        L"HoldMs=80\n"
-        L"Interval=6000\n"
-        L"\n"
-        L"[Step3]\n"
-        L"Name=\u6bd4\u8d5b\u4e2d\n"
-        L"Mode=hold\n"
-        L"Duration=20000\n"
-        L"Key=87\n"
-    );
+    if (GetFileAttributesW(src_path) == INVALID_FILE_ATTRIBUTES)
+        return FALSE;
 
-    fclose(f);
-    return TRUE;
+    return CopyFileW(src_path, path, TRUE);
+}
+
+WCHAR* Profile_ReadComments(const WCHAR *ini_path)
+{
+    if (!ini_path) return NULL;
+
+    int total_len = 0;
+    WCHAR *content = ReadFileToWideString(ini_path, &total_len);
+    if (!content) return NULL;
+
+    WCHAR *result = (WCHAR *)calloc(4096, sizeof(WCHAR));
+    if (!result) { free(content); return NULL; }
+
+    int pos = 0;
+    int cap = 4096;
+    WCHAR *line_start = content;
+
+    while (*line_start) {
+        WCHAR *line_end = line_start;
+        while (*line_end && *line_end != L'\n') line_end++;
+
+        WCHAR *p = line_start;
+        while (p < line_end && (*p == L' ' || *p == L'\t')) p++;
+
+        if (*p == L';') {
+            p++;
+            if (*p == L' ') p++;
+
+            int len = (int)(line_end - p);
+            if (len > 0 && p[len - 1] == L'\r') len--;
+            if (pos + len + 3 >= cap) break;
+
+            memcpy(result + pos, p, len * sizeof(WCHAR));
+            pos += len;
+            result[pos++] = L'\r';
+            result[pos++] = L'\n';
+        }
+
+        line_start = (*line_end == L'\n') ? line_end + 1 : line_end;
+    }
+    result[pos] = L'\0';
+
+    free(content);
+    return result;
 }

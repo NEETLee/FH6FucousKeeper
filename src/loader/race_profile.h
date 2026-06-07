@@ -87,4 +87,7 @@ int     Profile_Enumerate(WCHAR names[][PROFILE_NAME_LEN], int max_count);
 /* Write the default profile with full Chinese documentation */
 BOOL    Profile_WriteDefaultTemplate(const WCHAR *path);
 
+/* Read comment lines from a profile INI file for display (caller frees with free()) */
+WCHAR*  Profile_ReadComments(const WCHAR *ini_path);
+
 #endif /* FOCUSKEEPER_RACE_PROFILE_H */

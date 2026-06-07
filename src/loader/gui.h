@@ -74,4 +74,7 @@ void    Gui_GetSelectedProfile(WCHAR *out, int max_len);
 /* Show update available notification next to repo link */
 void    Gui_ShowUpdateAvailable(const WCHAR *version, const WCHAR *url);
 
+/* Auto Race page: set profile description text */
+void    Gui_SetProfileDescription(const WCHAR *text);
+
 #endif /* FOCUSKEEPER_GUI_H */

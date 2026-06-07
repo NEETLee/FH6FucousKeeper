@@ -23,7 +23,6 @@
 #include "gui.h"
 #include "tray.h"
 #include "hook_manager.h"
-#include "msg_replay.h"
 #include "window_finder.h"
 #include "logger.h"
 #include "settings.h"
@@ -33,6 +32,8 @@
 #include "race_controller.h"
 #include "race_profile.h"
 #include "version_check.h"
+
+#include <stdlib.h>
 
 #define WM_VERSION_CHECK_DONE (WM_APP + 100)
 
@@ -97,6 +98,17 @@ static LRESULT CALLBACK AppWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
         case IDC_BTN_RACE_STOP:  DoStopAutoRace(); return 0;
 
         case IDC_COMBO_PROFILE:
+            if (HIWORD(wParam) == CBN_SELCHANGE) {
+                WCHAR sel[MAX_PATH];
+                Gui_GetSelectedProfile(sel, MAX_PATH);
+                if (sel[0]) {
+                    WCHAR full_path[MAX_PATH];
+                    _snwprintf(full_path, MAX_PATH, L"%s%s", Profile_GetDirectory(), sel);
+                    WCHAR *comments = Profile_ReadComments(full_path);
+                    Gui_SetProfileDescription(comments);
+                    if (comments) free(comments);
+                }
+            }
             return 0;
 
         case IDM_TRAY_SHOW:
@@ -296,18 +308,10 @@ static void DoEnableHook(void)
             LOG_I(L"%s", I18n_Get(STR_LOG_HOOK_INSTALLED));
             return;
         }
-        LOG_W(L"DLL Hook failed: %s, trying message replay...", HookMgr_GetLastError());
+        LOG_E(L"DLL Hook failed: %s", HookMgr_GetLastError());
     }
 
-    /* Fallback: message replay (works without DLL injection) */
-    LOG_I(L"%s (interval: %lu ms)", I18n_Get(STR_LOG_REPLAY_STARTED),
-        s_app.settings.replay_interval);
-    if (MsgReplay_Start(s_app.game_hwnd, s_app.settings.replay_interval)) {
-        s_app.hook_active = TRUE;
-        OnHookStateChanged(HOOK_STATE_ACTIVE, L"");
-    } else {
-        LOG_E(L"%s", I18n_Get(STR_LOG_HOOK_FAILED));
-    }
+    LOG_E(L"%s", I18n_Get(STR_LOG_HOOK_FAILED));
 }
 
 static void DoDisableHook(void)
@@ -319,11 +323,6 @@ static void DoDisableHook(void)
         RaceCtrl_Stop(&s_race_ctrl);
         Gui_SetRaceRunning(FALSE);
         LOG_I(L"%s", I18n_Get(STR_LOG_RACE_STOPPED));
-    }
-
-    if (MsgReplay_IsActive()) {
-        MsgReplay_Stop();
-        LOG_I(L"%s", I18n_Get(STR_LOG_REPLAY_STOPPED));
     }
 
     if (HookMgr_GetState() == HOOK_STATE_ACTIVE) {
@@ -442,6 +441,15 @@ static void DoStartAutoRace(void)
             LOG_E(L"Failed to load profile: %s", sel_name);
             return;
         }
+
+        /* Display profile comments in the description area */
+        {
+            WCHAR full_path[MAX_PATH];
+            _snwprintf(full_path, MAX_PATH, L"%s%s", Profile_GetDirectory(), sel_name);
+            WCHAR *comments = Profile_ReadComments(full_path);
+            Gui_SetProfileDescription(comments);
+            if (comments) free(comments);
+        }
     }
 
     if (RaceCtrl_Start(&s_race_ctrl, s_app.game_hwnd)) {
@@ -530,7 +538,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     /* Initialize hook manager */
     if (!HookMgr_Init()) {
         LOG_E(L"Hook init failed: %s", HookMgr_GetLastError());
-        LOG_W(L"%s", I18n_Get(STR_LOG_DLL_UNAVAILABLE));
     }
     HookMgr_SetCallback(OnHookStateChanged);
 
@@ -586,6 +593,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         }
         if (count > 0) {
             Gui_PopulateProfiles(profile_names, count);
+            /* Show initial profile description */
+            WCHAR full_path[MAX_PATH];
+            _snwprintf(full_path, MAX_PATH, L"%s%s",
+                       Profile_GetDirectory(), profile_names[0]);
+            WCHAR *comments = Profile_ReadComments(full_path);
+            Gui_SetProfileDescription(comments);
+            if (comments) free(comments);
         }
     }
 
@@ -629,7 +643,6 @@ cleanup:
     }
     AudioCtrl_Shutdown();
     HookMgr_Shutdown();
-    MsgReplay_Stop();
 
     /* Restore normal power state */
     SetThreadExecutionState(ES_CONTINUOUS);
