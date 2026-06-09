@@ -10,7 +10,7 @@
  * thread. Notifies via callback when a newer version is found.
  */
 
-#define APP_VERSION L"1.2.0"
+#define APP_VERSION L"1.2.1"
 
 typedef void (*VersionCheckCallback)(const WCHAR *latest_version, const WCHAR *release_url, void *user_data);
 

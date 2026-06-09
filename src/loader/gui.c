@@ -361,6 +361,12 @@ void Gui_AppendLog(const WCHAR *text)
     SendMessage(s_gui.hwnd_log_edit, EM_SCROLLCARET, 0, 0);
 }
 
+void Gui_ClearLog(void)
+{
+    if (!s_gui.hwnd_log_edit) return;
+    SetWindowTextW(s_gui.hwnd_log_edit, L"");
+}
+
 void Gui_RefreshWindowList(const FindResult *result)
 {
     if (!s_gui.hwnd_listview || !result) return;

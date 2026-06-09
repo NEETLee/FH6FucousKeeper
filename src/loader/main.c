@@ -90,7 +90,7 @@ static LRESULT CALLBACK AppWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
             return 0;
         }
         case IDC_BTN_CLEAR_LOG:
-            SetWindowTextW(GetDlgItem(hwnd, IDC_LOG_EDIT), L"");
+            Gui_ClearLog();
             return 0;
         case IDC_BTN_SAVE:      DoSaveSettings(); return 0;
 

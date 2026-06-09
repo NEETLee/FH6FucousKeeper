@@ -37,6 +37,9 @@ void    Gui_UpdateStats(LONG killfocus, LONG activateapp, LONG ncactivate, LONG 
 /* Append a log entry to the log page */
 void    Gui_AppendLog(const WCHAR *text);
 
+/* Clear all log entries */
+void    Gui_ClearLog(void);
+
 /* Refresh the window list */
 void    Gui_RefreshWindowList(const FindResult *result);
 
