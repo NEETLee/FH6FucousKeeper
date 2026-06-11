@@ -7,14 +7,27 @@ alwaysApply: false
 
 When the user asks to publish/release a new version:
 
-1. **Update `APP_VERSION`** in `src/loader/version_check.h` to match the new tag version BEFORE committing
-2. Commit all changes
-3. Push to `main`
-4. Create and push a git tag (e.g. `v1.3.0`) to trigger the GitHub Actions release build
-5. The tag version, `APP_VERSION`, and the commit should all be in sync
+1. **Update `CHANGELOG.md`**: add a new section for the version BEFORE committing. Follow the existing
+   Keep a Changelog style (`## [x.y.z] - YYYY-MM-DD` with `### 新增 / 变更 / 修复` subsections) and add
+   the compare link at the bottom. The release workflow auto-extracts this section into the GitHub
+   release body via `body_path`, so the section heading version MUST match the tag (without the `v`).
+2. **Update `APP_VERSION`** in `src/loader/version_check.h` to match the new tag version
+3. Commit all changes
+4. Push to `main`
+5. Create and push a git tag (e.g. `v1.3.0`) to trigger the GitHub Actions release build
+6. The tag version, `APP_VERSION`, the `CHANGELOG.md` section, and the commit should all be in sync
 
 Example:
 ```c
 // src/loader/version_check.h
 #define APP_VERSION L"1.3.0"  // Must match the tag being created
+```
+
+```markdown
+<!-- CHANGELOG.md -->
+## [1.3.0] - 2026-06-15
+### 新增
+- ...
+
+[1.3.0]: https://github.com/NEETLee/FH6FucousKeeper/compare/v1.2.1...v1.3.0
 ```
