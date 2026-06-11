@@ -39,9 +39,35 @@ jobs:
           Copy-Item "build/profiles/*" "release/profiles/"
           Compress-Archive -Path "release/*" -DestinationPath "FH6FocusKeeper-$tag.zip"
 
+      - name: Extract release notes
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $ver = $tag.TrimStart('v')
+          $notes = ""
+          if (Test-Path "CHANGELOG.md") {
+            $lines = Get-Content "CHANGELOG.md"
+            $start = ($lines | Select-String -Pattern ("^##\s*\[" + [regex]::Escape($ver) + "\]")).LineNumber
+            if ($start) {
+              $buf = @()
+              for ($i = $start; $i -lt $lines.Count; $i++) {
+                if ($lines[$i] -match '^##\s') { break }
+                $buf += $lines[$i]
+              }
+              $notes = ($buf -join "`n").Trim()
+            }
+          }
+          if ([string]::IsNullOrWhiteSpace($notes)) {
+            $notes = "本版本未提供变更说明，请参见自动生成的更新内容。"
+          }
+          Set-Content -Path "RELEASE_NOTES.md" -Value $notes -Encoding utf8
+          Write-Host "----- RELEASE_NOTES.md -----"
+          Get-Content "RELEASE_NOTES.md"
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           name: FH6 FocusKeeper ${{ github.ref_name }}
+          body_path: RELEASE_NOTES.md
           generate_release_notes: true
           files: FH6FocusKeeper-*.zip
