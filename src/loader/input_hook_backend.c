@@ -52,6 +52,20 @@ static void HookBackend_Shutdown(InputBackend *self)
     impl->ready = FALSE;
 }
 
+static BOOL IsExtendedKey(DWORD vk)
+{
+    switch (vk) {
+    case VK_UP: case VK_DOWN: case VK_LEFT: case VK_RIGHT:
+    case VK_INSERT: case VK_DELETE: case VK_HOME: case VK_END:
+    case VK_PRIOR: case VK_NEXT:
+    case VK_RCONTROL: case VK_RMENU:
+    case VK_NUMLOCK: case VK_DIVIDE:
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
 static void HookBackend_KeyDown(InputBackend *self, DWORD vk)
 {
     HookBackendImpl *impl = (HookBackendImpl *)self;
@@ -59,13 +73,12 @@ static void HookBackend_KeyDown(InputBackend *self, DWORD vk)
 
     UINT sc = MapVirtualKey(vk, MAPVK_VK_TO_VSC);
     LPARAM lParam;
+    LPARAM extended = IsExtendedKey(vk) ? (1 << 24) : 0;
 
     if (impl->key_state[vk & 0xFF]) {
-        /* Key already down: send repeat (bit 30 = previous state was down) */
-        lParam = 1 | (sc << 16) | (1 << 30);
+        lParam = 1 | (sc << 16) | extended | (1 << 30);
     } else {
-        /* First press */
-        lParam = 1 | (sc << 16);
+        lParam = 1 | (sc << 16) | extended;
         impl->key_state[vk & 0xFF] = 1;
     }
 
@@ -78,7 +91,8 @@ static void HookBackend_KeyUp(InputBackend *self, DWORD vk)
     if (!impl->ready || !IsWindow(impl->game_hwnd)) return;
 
     UINT sc = MapVirtualKey(vk, MAPVK_VK_TO_VSC);
-    LPARAM lParam = 1 | (sc << 16) | (1 << 30) | (1 << 31);
+    LPARAM extended = IsExtendedKey(vk) ? (1 << 24) : 0;
+    LPARAM lParam = 1 | (sc << 16) | extended | (1 << 30) | (1 << 31);
 
     PostMessage(impl->game_hwnd, WM_KEYUP, vk, lParam);
     impl->key_state[vk & 0xFF] = 0;
@@ -92,7 +106,8 @@ static void HookBackend_ReleaseAll(InputBackend *self)
     for (int vk = 0; vk < 256; vk++) {
         if (impl->key_state[vk]) {
             UINT sc = MapVirtualKey(vk, MAPVK_VK_TO_VSC);
-            LPARAM lp = 1 | (sc << 16) | (1 << 30) | (1 << 31);
+            LPARAM ext = IsExtendedKey((DWORD)vk) ? (1 << 24) : 0;
+            LPARAM lp = 1 | (sc << 16) | ext | (1 << 30) | (1 << 31);
             PostMessage(impl->game_hwnd, WM_KEYUP, vk, lp);
             impl->key_state[vk] = 0;
         }

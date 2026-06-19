@@ -88,6 +88,9 @@ BOOL ScreenCapture_GrabFrame(CaptureFrame *frame)
     if (!frame || !s_gdi.active || !s_gdi.target_hwnd) return FALSE;
     if (!IsWindow(s_gdi.target_hwnd)) return FALSE;
 
+    /* Cannot capture minimized windows with GDI */
+    if (IsIconic(s_gdi.target_hwnd)) return FALSE;
+
     RECT rc;
     if (!GetClientRect(s_gdi.target_hwnd, &rc)) return FALSE;
 

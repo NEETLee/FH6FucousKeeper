@@ -465,8 +465,16 @@ void Gui_RefreshLanguage(BOOL hook_active, BOOL muted)
 
     if (!s_gui.hwnd_main) return;
 
-    /* Window title */
+    /* Window title (debug builds get a visible [DEBUG] suffix) */
+#ifdef FK_DEBUG
+    {
+        WCHAR title[160];
+        wsprintfW(title, L"%s  [DEBUG]", I18n_Get(STR_APP_TITLE));
+        SetWindowTextW(s_gui.hwnd_main, title);
+    }
+#else
     SetWindowTextW(s_gui.hwnd_main, I18n_Get(STR_APP_TITLE));
+#endif
 
     /* Tab labels */
     if (s_gui.hwnd_tab) {
@@ -554,6 +562,30 @@ void Gui_RefreshLanguage(BOOL hook_active, BOOL muted)
         if (ha) SetWindowTextW(ha, I18n_Get(STR_ABOUT_AUTHOR));
         ha = GetDlgItem(page, IDC_LBL_ABOUT_REPO);
         if (ha) SetWindowTextW(ha, I18n_Get(STR_ABOUT_REPO));
+    }
+
+    /* Auto Farm tab: refresh ID'd buttons/checkboxes (static labels with
+     * no control ID are localized at creation time). */
+    HWND pf = s_gui.pages[4];
+    if (pf) {
+        struct { int id; StringId s; } items[] = {
+            { IDC_PIPE_BTN_READ,   STR_PIPE_READ },
+            { IDC_PIPE_CHK_RACE,   STR_PIPE_STEP_RACE },
+            { IDC_PIPE_CHK_BUY,    STR_PIPE_STEP_BUY },
+            { IDC_PIPE_CHK_SPIN,   STR_PIPE_STEP_SPIN },
+            { IDC_PIPE_CHK_REMOVE, STR_PIPE_STEP_REMOVE },
+            { IDC_PIPE_CHK_AUTO,   STR_PIPE_AUTO_COUNT },
+            { IDC_PIPE_BTN_LOOP,   STR_PIPE_BTN_LOOP },
+            { IDC_PIPE_BTN_STOP,   STR_PIPE_BTN_STOP },
+            { IDC_PIPE_BTN_RACE,   STR_PIPE_STEP_RACE },
+            { IDC_PIPE_BTN_BUY,    STR_PIPE_STEP_BUY },
+            { IDC_PIPE_BTN_SPIN,   STR_PIPE_STEP_SPIN },
+            { IDC_PIPE_BTN_REMOVE, STR_PIPE_STEP_REMOVE },
+        };
+        for (size_t i = 0; i < sizeof(items)/sizeof(items[0]); i++) {
+            HWND h = GetDlgItem(pf, items[i].id);
+            if (h) SetWindowTextW(h, I18n_Get(items[i].s));
+        }
     }
 
     /* Force full repaint including all child controls */
@@ -785,43 +817,137 @@ static void CreateSettingsPage(HWND parent)
 
 /* ─── Auto Race Page ──────────────────────────────────────────────── */
 
+/* small helper for a numeric edit with a preceding label */
+static void CreateLabeledEdit(HWND page, const WCHAR *label, const WCHAR *def,
+                             int lx, int ex, int y, int lw, int ew, int id) {
+    CreateCtrl(L"STATIC", label, SS_LEFT, lx, y + S(3), S(lw), S(18), page, 0);
+    CreateCtrlEx(WS_EX_CLIENTEDGE, L"EDIT", def, ES_NUMBER,
+        ex, y, S(ew), S(22), page, id);
+}
+
+/* Set an auto-checkbox checked. */
+static void SetChecked(HWND page, int id, BOOL checked) {
+    HWND h = GetDlgItem(page, id);
+    if (h) SendMessage(h, BM_SETCHECK, checked ? BST_CHECKED : BST_UNCHECKED, 0);
+}
+
 static void CreateAutoRacePage(HWND parent)
 {
     int m = S(CTRL_MARGIN);
+    int pw = S(460);                  /* content width (matches Log page) */
+    int lblw = S(80);                 /* width for the row labels (steps/single) */
     int y = S(10);
     HWND page = CreateWindowExW(0, PANEL_CLASS, L"",
         WS_CHILD | WS_CLIPCHILDREN,
         0, 0, 0, 0, parent, NULL, s_gui.hInstance, NULL);
     s_gui.pages[4] = page;
+    s_gui.hwnd_edit_profile_desc = NULL;
 
-    /* Profile selector */
-    CreateCtrl(L"STATIC", I18n_Get(STR_RACE_PROFILE), SS_LEFT,
-        m, y, S(80), S(20), page, 0);
-    s_gui.hwnd_combo_profile = CreateCtrlEx(0, L"COMBOBOX", L"",
-        CBS_DROPDOWNLIST | WS_VSCROLL,
-        S(95), y - S(2), S(320), S(200), page, IDC_COMBO_PROFILE);
+    /* ── Foundation: car + race profile pickers on one compact row ── */
+    {
+        int carlw = S(28), racelw = S(36), gap = S(10);
+        int combo_total = pw - carlw - racelw - gap;   /* shared by 2 combos */
+        int cw1 = combo_total / 2;
+        int cx = m;
+        CreateCtrl(L"STATIC", I18n_Get(STR_PIPE_CAR), SS_LEFT,
+            cx, y + S(4), carlw, S(18), page, 0);
+        cx += carlw;
+        CreateCtrlEx(0, L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL,
+            cx, y, cw1, S(220), page, IDC_PIPE_COMBO_CAR);
+        cx += cw1 + gap;
+        CreateCtrl(L"STATIC", I18n_Get(STR_PIPE_STEP_RACE), SS_LEFT,
+            cx, y + S(4), racelw, S(18), page, 0);
+        cx += racelw;
+        s_gui.hwnd_combo_profile = CreateCtrlEx(0, L"COMBOBOX", L"",
+            CBS_DROPDOWNLIST | WS_VSCROLL,
+            cx, y, m + pw - cx, S(220), page, IDC_COMBO_PROFILE);
+    }
+    y += S(34);
+
+    /* ── Foundation: economy readout + refresh CR/SP ── */
+    {
+        int btnw = S(120);
+        HWND econ = CreateCtrl(L"STATIC",
+            L"CR: - | SP: - | -\r\n-",
+            SS_LEFT, m, y, pw - btnw - S(8), S(40), page, IDC_PIPE_LBL_ECON);
+        if (econ && s_gui.hFont)
+            SendMessage(econ, WM_SETFONT, (WPARAM)s_gui.hFont, TRUE);
+        CreateCtrl(L"BUTTON", I18n_Get(STR_PIPE_READ), BS_PUSHBUTTON,
+            m + pw - btnw, y + S(7), btnw, S(26), page, IDC_PIPE_BTN_READ);
+    }
+    y += S(46);
+
+    /* ── Loop step selection (checkboxes) ── */
+    CreateCtrl(L"STATIC", I18n_Get(STR_PIPE_STEPS_LABEL), SS_LEFT,
+        m, y + S(2), lblw, S(18), page, 0);
+    {
+        int cx = m + lblw;
+        int cw = (pw - lblw) / 4;
+        CreateCtrlEx(0, L"BUTTON", I18n_Get(STR_PIPE_STEP_RACE), BS_AUTOCHECKBOX,
+            cx, y, cw, S(20), page, IDC_PIPE_CHK_RACE);   cx += cw;
+        CreateCtrlEx(0, L"BUTTON", I18n_Get(STR_PIPE_STEP_BUY), BS_AUTOCHECKBOX,
+            cx, y, cw, S(20), page, IDC_PIPE_CHK_BUY);    cx += cw;
+        CreateCtrlEx(0, L"BUTTON", I18n_Get(STR_PIPE_STEP_SPIN), BS_AUTOCHECKBOX,
+            cx, y, cw, S(20), page, IDC_PIPE_CHK_SPIN);   cx += cw;
+        CreateCtrlEx(0, L"BUTTON", I18n_Get(STR_PIPE_STEP_REMOVE), BS_AUTOCHECKBOX,
+            cx, y, cw, S(20), page, IDC_PIPE_CHK_REMOVE);
+    }
+    SetChecked(page, IDC_PIPE_CHK_RACE, TRUE);
+    SetChecked(page, IDC_PIPE_CHK_BUY, TRUE);
+    SetChecked(page, IDC_PIPE_CHK_SPIN, TRUE);
+    SetChecked(page, IDC_PIPE_CHK_REMOVE, TRUE);
     y += S(30);
 
-    /* Start / Stop buttons */
-    s_gui.hwnd_btn_race_start = CreateCtrl(L"BUTTON", I18n_Get(STR_RACE_BTN_START),
-        BS_PUSHBUTTON, m, y, S(130), S(26), page, IDC_BTN_RACE_START);
-    s_gui.hwnd_btn_race_stop = CreateCtrl(L"BUTTON", I18n_Get(STR_RACE_BTN_STOP),
-        BS_PUSHBUTTON, m + S(140), y, S(130), S(26), page, IDC_BTN_RACE_STOP);
-    EnableWindow(s_gui.hwnd_btn_race_stop, FALSE);
+    /* ── Params (single row): target SP, cycles, manual count, auto-count ──
+     * CR/SP cost comes from the car profile; SP-per-lap from the race profile. */
+    CreateLabeledEdit(page, I18n_Get(STR_PIPE_TARGET_SP), L"999",
+        m, m + S(56), y, 52, 44, IDC_PIPE_EDIT_TARGET_SP);
+    CreateLabeledEdit(page, I18n_Get(STR_PIPE_CYCLES), L"1",
+        m + S(116), m + S(180), y, 56, 40, IDC_PIPE_EDIT_CYCLES);
+    CreateLabeledEdit(page, I18n_Get(STR_PIPE_MANUAL_COUNT), L"1",
+        m + S(240), m + S(304), y, 56, 40, IDC_PIPE_EDIT_COUNT);
+    CreateCtrlEx(0, L"BUTTON", I18n_Get(STR_PIPE_AUTO_COUNT), BS_AUTOCHECKBOX,
+        m + S(360), y + S(1), pw - S(360), S(22), page, IDC_PIPE_CHK_AUTO);
+    SetChecked(page, IDC_PIPE_CHK_AUTO, TRUE);
+    /* Hidden legacy laps edit kept so old code paths stay valid. */
+    CreateCtrlEx(0, L"EDIT", L"3", ES_NUMBER, 0, 0, 0, 0, page, IDC_PIPE_EDIT_LAPS);
+    ShowWindow(GetDlgItem(page, IDC_PIPE_EDIT_LAPS), SW_HIDE);
+    y += S(34);
+
+    /* ── Controls: full loop / stop ── */
+    CreateCtrl(L"BUTTON", I18n_Get(STR_PIPE_BTN_LOOP),
+        BS_PUSHBUTTON, m, y, pw / 2 - S(5), S(28), page, IDC_PIPE_BTN_LOOP);
+    CreateCtrl(L"BUTTON", I18n_Get(STR_PIPE_BTN_STOP),
+        BS_PUSHBUTTON, m + pw / 2 + S(5), y, pw / 2 - S(5), S(28), page, IDC_PIPE_BTN_STOP);
+    EnableWindow(GetDlgItem(page, IDC_PIPE_BTN_STOP), FALSE);
+    y += S(36);
+
+    /* ── Single-step debug buttons ── */
+    CreateCtrl(L"STATIC", I18n_Get(STR_PIPE_SINGLE_LABEL), SS_LEFT,
+        m, y + S(4), lblw, S(18), page, 0);
+    {
+        int nbtns = 4;
+        int bx = m + lblw;
+        int avail = pw - lblw;
+        int bg = S(5);
+        int bw = (avail - bg * (nbtns - 1)) / nbtns;
+        CreateCtrl(L"BUTTON", I18n_Get(STR_PIPE_STEP_RACE),   BS_PUSHBUTTON, bx, y, bw, S(24), page, IDC_PIPE_BTN_RACE);   bx += bw + bg;
+        CreateCtrl(L"BUTTON", I18n_Get(STR_PIPE_STEP_BUY),    BS_PUSHBUTTON, bx, y, bw, S(24), page, IDC_PIPE_BTN_BUY);    bx += bw + bg;
+        CreateCtrl(L"BUTTON", I18n_Get(STR_PIPE_STEP_SPIN),   BS_PUSHBUTTON, bx, y, bw, S(24), page, IDC_PIPE_BTN_SPIN);   bx += bw + bg;
+        CreateCtrl(L"BUTTON", I18n_Get(STR_PIPE_STEP_REMOVE), BS_PUSHBUTTON, bx, y, bw, S(24), page, IDC_PIPE_BTN_REMOVE);
+    }
     y += S(32);
 
-    /* Compact single-line status: "状态 | 步骤 | 圈数 | 时间" */
-    s_gui.hwnd_lbl_race_info = CreateCtrl(L"STATIC", I18n_Get(STR_RACE_STATUS_IDLE),
-        SS_LEFT, m, y, S(430), S(18), page, IDC_LBL_RACE_STATUS);
-    y += S(26);
-
-    /* Profile description area (read-only multiline edit for comments) */
-    s_gui.hwnd_edit_profile_desc = CreateCtrlEx(
-        WS_EX_CLIENTEDGE, L"EDIT", L"",
-        WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL,
-        m, y, S(430), S(200), page, IDC_LBL_RACE_STEP);
-    if (s_gui.hwnd_edit_profile_desc && s_gui.hFontFooter)
-        SendMessage(s_gui.hwnd_edit_profile_desc, WM_SETFONT, (WPARAM)s_gui.hFontFooter, TRUE);
+    /* ── Per-step pipeline log (append, fills remaining height) ── */
+    {
+        int log_h = S(BASE_HEIGHT) - S(92) - y;
+        if (log_h < S(60)) log_h = S(60);
+        HWND log = CreateCtrlEx(WS_EX_CLIENTEDGE, L"EDIT", L"",
+            ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL,
+            m, y, pw, log_h, page, IDC_PIPE_LOG);
+        if (log && s_gui.hFont)
+            SendMessage(log, WM_SETFONT, (WPARAM)s_gui.hFont, TRUE);
+    }
 }
 
 /* ─── Page Layout and Switching ───────────────────────────────────── */
@@ -942,6 +1068,117 @@ void Gui_SetProfileDescription(const WCHAR *text)
 {
     if (!s_gui.hwnd_edit_profile_desc) return;
     SetWindowTextW(s_gui.hwnd_edit_profile_desc, text ? text : L"");
+}
+
+/* ─── Pipeline (Auto Wheelspin Farm) helpers ──────────────────────── */
+
+static int GetEditInt(HWND page, int id, int fallback) {
+    WCHAR buf[32] = {0};
+    HWND h = GetDlgItem(page, id);
+    if (!h) return fallback;
+    GetWindowTextW(h, buf, 31);
+    if (!buf[0]) return fallback;
+    return _wtoi(buf);
+}
+
+static BOOL IsChecked(HWND page, int id) {
+    return page &&
+        (SendMessage(GetDlgItem(page, id), BM_GETCHECK, 0, 0) == BST_CHECKED);
+}
+
+void Gui_GetPipelineParams(GuiPipelineParams *out)
+{
+    if (!out) return;
+    HWND page = s_gui.pages[4];
+    out->race_laps    = GetEditInt(page, IDC_PIPE_EDIT_LAPS, 3);
+    out->cycles       = GetEditInt(page, IDC_PIPE_EDIT_CYCLES, 1);
+    out->manual_count = GetEditInt(page, IDC_PIPE_EDIT_COUNT, 1);
+    out->target_sp    = GetEditInt(page, IDC_PIPE_EDIT_TARGET_SP, 999);
+    out->auto_count   = IsChecked(page, IDC_PIPE_CHK_AUTO);
+    out->enable_race  = IsChecked(page, IDC_PIPE_CHK_RACE);
+    out->enable_buy   = IsChecked(page, IDC_PIPE_CHK_BUY);
+    out->enable_spin  = IsChecked(page, IDC_PIPE_CHK_SPIN);
+    out->enable_remove= IsChecked(page, IDC_PIPE_CHK_REMOVE);
+}
+
+void Gui_SetPipelineEcon(int cr, int sp, int count,
+                         const WCHAR *stage, const WCHAR *totals)
+{
+    HWND page = s_gui.pages[4];
+    if (!page) return;
+    HWND h = GetDlgItem(page, IDC_PIPE_LBL_ECON);
+    if (!h) return;
+
+    WCHAR crbuf[24], spbuf[24], cntbuf[24];
+    if (cr >= 0)    _snwprintf(crbuf, 24, L"%d", cr);    else wcscpy(crbuf, L"-");
+    if (sp >= 0)    _snwprintf(spbuf, 24, L"%d", sp);    else wcscpy(spbuf, L"-");
+    if (count >= 0) _snwprintf(cntbuf, 24, L"%d", count); else wcscpy(cntbuf, L"-");
+
+    WCHAR line1[256], line2[320], buf[600];
+    _snwprintf(line1, 256, I18n_Get(STR_PIPE_ECON_FMT), crbuf, spbuf, cntbuf);
+    _snwprintf(line2, 320, I18n_Get(STR_PIPE_STAGE_FMT),
+        stage ? stage : L"-", totals ? totals : L"");
+    _snwprintf(buf, 600, L"%s\r\n%s", line1, line2);
+    SetWindowTextW(h, buf);
+}
+
+void Gui_AppendPipelineLog(const WCHAR *text)
+{
+    HWND page = s_gui.pages[4];
+    if (!page || !text) return;
+    HWND h = GetDlgItem(page, IDC_PIPE_LOG);
+    if (!h) return;
+
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    WCHAR line[1100];
+    _snwprintf(line, 1100, L"[%02d:%02d:%02d] %s\r\n",
+        st.wHour, st.wMinute, st.wSecond, text);
+
+    int len = GetWindowTextLengthW(h);
+    if (len > 28000) {
+        SetWindowTextW(h, L"");
+        len = 0;
+    }
+    SendMessageW(h, EM_SETSEL, len, len);
+    SendMessageW(h, EM_REPLACESEL, FALSE, (LPARAM)line);
+    SendMessageW(h, EM_SCROLLCARET, 0, 0);
+}
+
+void Gui_PopulateCarProfiles(const WCHAR names[][64], int count)
+{
+    HWND page = s_gui.pages[4];
+    if (!page) return;
+    HWND combo = GetDlgItem(page, IDC_PIPE_COMBO_CAR);
+    if (!combo) return;
+    SendMessage(combo, CB_RESETCONTENT, 0, 0);
+    for (int i = 0; i < count; i++)
+        SendMessageW(combo, CB_ADDSTRING, 0, (LPARAM)names[i]);
+    if (count > 0)
+        SendMessage(combo, CB_SETCURSEL, 0, 0);
+}
+
+int Gui_GetSelectedCarProfile(void)
+{
+    HWND page = s_gui.pages[4];
+    if (!page) return -1;
+    HWND combo = GetDlgItem(page, IDC_PIPE_COMBO_CAR);
+    if (!combo) return -1;
+    return (int)SendMessage(combo, CB_GETCURSEL, 0, 0);
+}
+
+void Gui_SetPipelineRunning(BOOL running)
+{
+    HWND page = s_gui.pages[4];
+    if (!page) return;
+    int step_btns[] = { IDC_PIPE_BTN_RACE, IDC_PIPE_BTN_READ, IDC_PIPE_BTN_BUY,
+                        IDC_PIPE_BTN_SPIN, IDC_PIPE_BTN_REMOVE, IDC_PIPE_BTN_LOOP };
+    for (size_t i = 0; i < sizeof(step_btns)/sizeof(step_btns[0]); i++) {
+        HWND b = GetDlgItem(page, step_btns[i]);
+        if (b) EnableWindow(b, !running);
+    }
+    HWND stop = GetDlgItem(page, IDC_PIPE_BTN_STOP);
+    if (stop) EnableWindow(stop, running);
 }
 
 /* ─── Window Procedure ────────────────────────────────────────────── */

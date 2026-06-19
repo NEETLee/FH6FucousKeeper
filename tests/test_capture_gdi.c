@@ -116,6 +116,9 @@ static void AnalyzeFrame(const CaptureFrame *frame)
 
 int wmain(int argc, WCHAR *argv[])
 {
+    /* Force unbuffered output for diagnostics */
+    setvbuf(stdout, NULL, _IONBF, 0);
+
     wprintf(L"=== FH6 FocusKeeper - GDI Capture Test ===\n\n");
 
     /* Find window */
@@ -160,7 +163,18 @@ int wmain(int argc, WCHAR *argv[])
     /* Grab frame */
     CaptureFrame frame;
     if (!ScreenCapture_GrabFrame(&frame)) {
-        wprintf(L"[ERROR] Failed to grab frame\n");
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        wprintf(L"[DEBUG] Client rect: %ld x %ld\n", rc.right - rc.left, rc.bottom - rc.top);
+        wprintf(L"[DEBUG] IsIconic (minimized): %d\n", IsIconic(hwnd));
+        if (IsIconic(hwnd)) {
+            wprintf(L"[ERROR] Window is minimized. GDI capture requires the window\n");
+            wprintf(L"        to be restored (not minimized). It can be behind other\n");
+            wprintf(L"        windows, just not minimized.\n");
+            wprintf(L"        Tip: Use WGC mode (make wgc) for minimized window capture.\n");
+        } else {
+            wprintf(L"[ERROR] Failed to grab frame (PrintWindow may not work for DX games)\n");
+        }
         ScreenCapture_StopCapture();
         ScreenCapture_Shutdown();
         return 1;

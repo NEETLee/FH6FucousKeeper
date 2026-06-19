@@ -26,6 +26,10 @@ CXXFLAGS += -D_WIN32_WINNT=0x0A00 -DNTDDI_VERSION=0x0A000007
 CXXFLAGS += -I./src -I./src/loader -I./res
 CXXFLAGS += -Wno-cast-function-type
 
+# OpenCV flags (MSYS2 MINGW64: pacman -S mingw-w64-x86_64-opencv)
+OPENCV_CFLAGS = -IC:/msys64/mingw64/include/opencv4
+OPENCV_LIBS = -LC:/msys64/mingw64/lib -lopencv_imgproc -lopencv_imgcodecs -lopencv_core
+
 # Linker flags
 LDFLAGS_DLL = -shared -Wl,--out-implib,build/libhook.a
 LDFLAGS_EXE = -mwindows -L./build -lhook -lcomctl32 -lpsapi -lole32 -loleaut32 -lgdi32 -lwinhttp
@@ -36,6 +40,7 @@ SRC_HOOK = src/hook
 SRC_LOADER = src/loader
 RES_DIR = res
 BUILD_DIR = build
+DIST_DIR = dist
 
 # Source files
 HOOK_SRC = $(SRC_HOOK)/hook.c
@@ -73,7 +78,7 @@ RES_OBJ = $(BUILD_DIR)/app_res.o
 
 # ─── Targets ──────────────────────────────────────────────────────────
 
-.PHONY: all clean rebuild dll exe dirs
+.PHONY: all clean rebuild dll exe dirs farm farm-release farm-replay
 
 all: dirs dll exe profiles
 
@@ -113,8 +118,99 @@ wgc: dirs dll $(CXX_OBJS) $(RES_OBJ)
 		$(filter-out %/screen_capture_gdi.c,$(LOADER_SRC)) \
 		$(CXX_OBJS) $(RES_OBJ) $(LDFLAGS_WGC) -lstdc++
 
+# ─── Farm build: full Auto Wheelspin Farm pipeline in FocusKeeper.exe ──
+# WGC capture + OpenCV template matching + OCR + farm flows/pipeline.
+# Usage: make farm
+FARM_CXX_OBJS = $(BUILD_DIR)/template_match.o \
+                $(BUILD_DIR)/screen_capture_wgc.o \
+                $(BUILD_DIR)/ocr_engine_wrt.o \
+                $(BUILD_DIR)/xbox_textentry.o
+FARM_C_SRC = $(filter-out %/screen_capture_gdi.c,$(LOADER_SRC)) \
+             $(SRC_LOADER)/game_input.c \
+             $(SRC_LOADER)/farm_flow.c \
+             $(SRC_LOADER)/farm_pipeline.c \
+             $(SRC_LOADER)/farm_economy.c \
+             $(SRC_LOADER)/car_profile.c
+
+$(BUILD_DIR)/template_match.o: $(SRC_LOADER)/template_match.cpp $(SRC_LOADER)/template_match.h
+	$(CXX) $(CXXFLAGS) $(OPENCV_CFLAGS) -c -o $@ $<
+
+$(BUILD_DIR)/screen_capture_wgc.o: $(SRC_LOADER)/screen_capture_wgc.cpp $(SRC_LOADER)/screen_capture.h
+	$(CXX) $(CXXFLAGS) -c -o $@ $<
+
+$(BUILD_DIR)/ocr_engine_wrt.o: $(SRC_LOADER)/ocr_engine_wrt.cpp $(SRC_LOADER)/ocr_engine.h
+	$(CXX) $(CXXFLAGS) -c -o $@ $<
+
+$(BUILD_DIR)/xbox_textentry.o: $(SRC_LOADER)/xbox_textentry.cpp $(SRC_LOADER)/xbox_textentry.h
+	$(CXX) $(CXXFLAGS) -c -o $@ $<
+
+farm-assets: dirs
+	@mkdir -p $(BUILD_DIR)/assets/templates
+	@cp -f assets/templates/* $(BUILD_DIR)/assets/templates/ 2>/dev/null || true
+
+# Copy per-car profiles (car.ini + car-specific templates) into the build tree.
+car-profiles: dirs
+	@mkdir -p $(BUILD_DIR)/profiles/cars
+	@cp -rf data/profiles/cars/* $(BUILD_DIR)/profiles/cars/ 2>/dev/null || true
+
+# `make farm`         -> DEBUG build (defines FK_DEBUG): file-routed step logs,
+#                        visual decision snapshots, stop.flag self-exit, etc.
+#                        Output: build/  (the dev sandbox).
+# `make farm-release`  -> shippable build, FK_DEBUG undefined so every debug-only
+#                        feature is removed by the preprocessor.
+#                        Output: dist/  (a clean, complete, runnable package).
+# The C sources are (re)compiled inline on every invocation, so switching between
+# the two targets always recompiles with the correct flags (no stale objects).
+
+# Copy the MinGW/OpenCV runtime DLLs the exe actually depends on into $(1).
+define bundle_dlls
+	@bash scripts/bundle_dlls.sh $(1)
+endef
+
+farm: CFLAGS += -DUSE_WGC_CAPTURE -DUSE_FARM
+farm: dirs dll $(FARM_CXX_OBJS) $(RES_OBJ) profiles farm-assets car-profiles
+	$(CC) $(CFLAGS) -DUSE_WGC_CAPTURE -DUSE_FARM -DFK_DEBUG -o $(EXE_OUT) \
+		$(FARM_C_SRC) \
+		$(FARM_CXX_OBJS) $(RES_OBJ) \
+		$(LDFLAGS_WGC) $(OPENCV_LIBS) -luuid -lstdc++
+	$(call bundle_dlls,$(BUILD_DIR))
+	@echo "[OK] Built $(EXE_OUT) (DEBUG farm pipeline)"
+
+# Release: assemble a clean dist/ with ONLY what ships (exe + hook.dll + runtime
+# DLLs + assets + profiles). dist/ is wiped first so it always reflects the build.
+farm-release: CFLAGS += -DUSE_WGC_CAPTURE -DUSE_FARM
+farm-release: dirs dll $(FARM_CXX_OBJS) $(RES_OBJ)
+	@rm -rf $(DIST_DIR)
+	@mkdir -p $(DIST_DIR)
+	$(CC) $(CFLAGS) -DUSE_WGC_CAPTURE -DUSE_FARM -o $(DIST_DIR)/FocusKeeper.exe \
+		$(FARM_C_SRC) \
+		$(FARM_CXX_OBJS) $(RES_OBJ) \
+		$(LDFLAGS_WGC) $(OPENCV_LIBS) -luuid -lstdc++
+	@cp -f $(DLL_OUT) $(DIST_DIR)/
+	$(call bundle_dlls,$(DIST_DIR))
+	@mkdir -p $(DIST_DIR)/assets/templates
+	@cp -f assets/templates/* $(DIST_DIR)/assets/templates/ 2>/dev/null || true
+	@mkdir -p $(DIST_DIR)/profiles
+	@cp -f data/profiles/*.ini $(DIST_DIR)/profiles/ 2>/dev/null || true
+	@mkdir -p $(DIST_DIR)/profiles/cars
+	@cp -rf data/profiles/cars/* $(DIST_DIR)/profiles/cars/ 2>/dev/null || true
+	@bash scripts/upx_compress.sh $(DIST_DIR)
+	@echo "[OK] Release package -> $(DIST_DIR)/ (RELEASE farm pipeline, no debug code)"
+
+# Offline replay tool: run the vision detectors on a saved PNG frame, no game
+# needed. Build: make farm-replay ; Run: build/farm_replay.exe frame.png [lang]
+farm-replay: dirs $(BUILD_DIR)/template_match.o $(BUILD_DIR)/ocr_engine_wrt.o
+	$(CXX) $(CXXFLAGS) $(OPENCV_CFLAGS) -mconsole -municode -I$(SRC_LOADER) \
+		-o $(BUILD_DIR)/farm_replay.exe \
+		$(TEST_DIR)/farm_replay.cpp \
+		$(BUILD_DIR)/template_match.o $(BUILD_DIR)/ocr_engine_wrt.o \
+		-ld3d11 -ldxgi -lruntimeobject -lole32 -loleaut32 -lgdi32 -luser32 \
+		$(OPENCV_LIBS)
+	@echo "[OK] Built $(BUILD_DIR)/farm_replay.exe"
+	@echo "Run: $(BUILD_DIR)/farm_replay.exe <frame.png> [lang]"
+
 clean:
-	@rm -rf $(BUILD_DIR)
+	@rm -rf $(BUILD_DIR) $(DIST_DIR)
 
 rebuild: clean all
 
@@ -143,8 +239,176 @@ test-capture: dirs $(BUILD_DIR)/screen_capture.o $(BUILD_DIR)/ocr_engine.o
 
 # Quick test with GDI capture (no WinRT dependency)
 test-capture-gdi: dirs
-	$(CC) $(CFLAGS) -DTEST_STANDALONE -mconsole -o $(BUILD_DIR)/test_capture_gdi.exe \
+	$(CC) $(CFLAGS) -DTEST_STANDALONE -mconsole -municode -o $(BUILD_DIR)/test_capture_gdi.exe \
 		$(TEST_DIR)/test_capture_gdi.c \
 		$(SRC_LOADER)/screen_capture_gdi.c \
 		-lgdi32 -luser32
 	@echo "[OK] Built $(BUILD_DIR)/test_capture_gdi.exe"
+
+# WGC capture test (background + minimized window support)
+test-capture-wgc: dirs
+	$(CXX) $(CXXFLAGS) -mconsole -municode -I$(SRC_LOADER) \
+		-o $(BUILD_DIR)/test_capture_wgc.exe \
+		$(TEST_DIR)/test_wgc_mini.cpp \
+		$(SRC_LOADER)/screen_capture_wgc.cpp \
+		-ld3d11 -ldxgi -lruntimeobject -lole32 -lgdi32 -luser32
+	@echo "[OK] Built $(BUILD_DIR)/test_capture_wgc.exe"
+	@echo "Run: $(BUILD_DIR)/test_capture_wgc.exe"
+
+# WGC + OCR pipeline test (capture + recognize text)
+test-ocr: dirs
+	$(CXX) $(CXXFLAGS) -mconsole -municode -I$(SRC_LOADER) \
+		-o $(BUILD_DIR)/test_ocr_mini.exe \
+		$(TEST_DIR)/test_ocr_mini.cpp \
+		$(SRC_LOADER)/screen_capture_wgc.cpp \
+		$(SRC_LOADER)/ocr_engine_wrt.cpp \
+		-ld3d11 -ldxgi -lruntimeobject -lole32 -lgdi32 -luser32
+	@echo "[OK] Built $(BUILD_DIR)/test_ocr_mini.exe"
+	@echo "Run: $(BUILD_DIR)/test_ocr_mini.exe [\"Window Title\"] [lang]"
+
+# Farm navigation test (remove car mode 2)
+test-farm-remove: dirs
+	$(CXX) $(CXXFLAGS) -mconsole -municode -I$(SRC_LOADER) \
+		-o $(BUILD_DIR)/test_farm_remove.exe \
+		$(TEST_DIR)/test_farm_remove.cpp \
+		$(SRC_LOADER)/screen_capture_wgc.cpp \
+		$(SRC_LOADER)/ocr_engine_wrt.cpp \
+		$(SRC_LOADER)/farm_nav.c \
+		$(SRC_LOADER)/input_hook_backend.c \
+		$(SRC_LOADER)/logger.c \
+		-ld3d11 -ldxgi -lruntimeobject -lole32 -lgdi32 -luser32
+	@echo "[OK] Built $(BUILD_DIR)/test_farm_remove.exe"
+	@echo "Run: $(BUILD_DIR)/test_farm_remove.exe [count]"
+
+# Background mouse-click feasibility POC (WGC + focus-ring observation)
+test-click-poc: dirs
+	$(CXX) $(CXXFLAGS) -mconsole -municode -I$(SRC_LOADER) \
+		-o $(BUILD_DIR)/test_click_poc.exe \
+		$(TEST_DIR)/test_click_poc.cpp \
+		$(SRC_LOADER)/screen_capture_wgc.cpp \
+		$(SRC_LOADER)/input_hook_backend.c \
+		-ld3d11 -ldxgi -lruntimeobject -lole32 -lgdi32 -luser32
+	@echo "[OK] Built $(BUILD_DIR)/test_click_poc.exe"
+	@echo "Run: $(BUILD_DIR)/test_click_poc.exe [\"Window Title\"]"
+
+# Navigation exploration test (find buy car path)
+test-nav-buy: dirs
+	$(CXX) $(CXXFLAGS) -mconsole -municode -I$(SRC_LOADER) \
+		-o $(BUILD_DIR)/test_nav_buy.exe \
+		$(TEST_DIR)/test_nav_buy.cpp \
+		$(SRC_LOADER)/screen_capture_wgc.cpp \
+		$(SRC_LOADER)/ocr_engine_wrt.cpp \
+		$(SRC_LOADER)/input_hook_backend.c \
+		-ld3d11 -ldxgi -lruntimeobject -lole32 -lgdi32 -luser32
+	@echo "[OK] Built $(BUILD_DIR)/test_nav_buy.exe"
+
+# OpenCV smoke test: WGC capture + matchTemplate on a known template
+test-opencv: dirs
+	$(CXX) $(CXXFLAGS) $(OPENCV_CFLAGS) -mconsole -municode -I$(SRC_LOADER) \
+		-o $(BUILD_DIR)/test_opencv.exe \
+		$(TEST_DIR)/test_opencv_smoke.cpp \
+		$(SRC_LOADER)/screen_capture_wgc.cpp \
+		-ld3d11 -ldxgi -lruntimeobject -lole32 -lgdi32 -luser32 \
+		$(OPENCV_LIBS)
+	@echo "[OK] Built $(BUILD_DIR)/test_opencv.exe"
+	@echo "Run: $(BUILD_DIR)/test_opencv.exe"
+
+# Batch template match validation (all templates against live/fixture frame)
+test-match-all: dirs
+	$(CXX) $(CXXFLAGS) $(OPENCV_CFLAGS) -mconsole -municode -I$(SRC_LOADER) \
+		-o $(BUILD_DIR)/test_match_all.exe \
+		$(TEST_DIR)/test_match_all.cpp \
+		$(SRC_LOADER)/template_match.cpp \
+		$(SRC_LOADER)/screen_capture_wgc.cpp \
+		-ld3d11 -ldxgi -lruntimeobject -lole32 -lgdi32 -luser32 \
+		$(OPENCV_LIBS)
+	@echo "[OK] Built $(BUILD_DIR)/test_match_all.exe"
+	@echo "Run: $(BUILD_DIR)/test_match_all.exe [fixture.png]"
+
+# End-to-end buy car flow test
+test-buy-car: dirs
+	$(CXX) $(CXXFLAGS) $(OPENCV_CFLAGS) -mconsole -municode -I$(SRC_LOADER) \
+		-o $(BUILD_DIR)/test_buy_car.exe \
+		$(TEST_DIR)/test_buy_car.cpp \
+		$(SRC_LOADER)/template_match.cpp \
+		$(SRC_LOADER)/game_input.c \
+		$(SRC_LOADER)/farm_flow.c \
+		$(SRC_LOADER)/screen_capture_wgc.cpp \
+		-ld3d11 -ldxgi -lruntimeobject -lole32 -lgdi32 -luser32 \
+		$(OPENCV_LIBS)
+	@echo "[OK] Built $(BUILD_DIR)/test_buy_car.exe"
+	@echo "Run: $(BUILD_DIR)/test_buy_car.exe [count]"
+
+# Step-by-step buy car diagnostic (saves labeled screenshots)
+test-buy-diag: dirs
+	$(CXX) $(CXXFLAGS) $(OPENCV_CFLAGS) -mconsole -municode -I$(SRC_LOADER) \
+		-o $(BUILD_DIR)/test_buy_diag.exe \
+		$(TEST_DIR)/test_buy_diag.cpp \
+		$(SRC_LOADER)/template_match.cpp \
+		$(SRC_LOADER)/game_input.c \
+		$(SRC_LOADER)/screen_capture_wgc.cpp \
+		-ld3d11 -ldxgi -lruntimeobject -lole32 -lgdi32 -luser32 \
+		$(OPENCV_LIBS)
+	@echo "[OK] Built $(BUILD_DIR)/test_buy_diag.exe"
+	@echo "Run: $(BUILD_DIR)/test_buy_diag.exe"
+
+test-focus: dirs
+	$(CXX) $(CXXFLAGS) $(OPENCV_CFLAGS) -mconsole \
+		-o $(BUILD_DIR)/test_focus.exe \
+		$(TEST_DIR)/test_focus.cpp \
+		$(OPENCV_LIBS)
+	@echo "[OK] Built $(BUILD_DIR)/test_focus.exe"
+
+test-mouse-nav: dirs
+	$(CXX) $(CXXFLAGS) $(OPENCV_CFLAGS) -mconsole -I$(SRC_LOADER) \
+		-o $(BUILD_DIR)/test_mouse_nav.exe \
+		$(TEST_DIR)/test_mouse_nav.cpp \
+		$(SRC_LOADER)/template_match.cpp \
+		$(SRC_LOADER)/game_input.c \
+		$(SRC_LOADER)/screen_capture_wgc.cpp \
+		-ld3d11 -ldxgi -lruntimeobject -lole32 -lgdi32 -luser32 \
+		$(OPENCV_LIBS)
+	@echo "[OK] Built $(BUILD_DIR)/test_mouse_nav.exe"
+
+test-nav3: dirs
+	$(CXX) $(CXXFLAGS) $(OPENCV_CFLAGS) -mconsole -I$(SRC_LOADER) \
+		-o $(BUILD_DIR)/test_nav3.exe \
+		$(TEST_DIR)/test_nav3.cpp \
+		$(SRC_LOADER)/template_match.cpp \
+		$(SRC_LOADER)/game_input.c \
+		$(SRC_LOADER)/screen_capture_wgc.cpp \
+		-ld3d11 -ldxgi -lruntimeobject -lole32 -lgdi32 -luser32 \
+		$(OPENCV_LIBS)
+	@echo "[OK] Built $(BUILD_DIR)/test_nav3.exe"
+
+test-flows: dirs
+	$(CXX) $(CXXFLAGS) $(OPENCV_CFLAGS) -mconsole -municode -I$(SRC_LOADER) \
+		-o $(BUILD_DIR)/test_flows.exe \
+		$(TEST_DIR)/test_flows.cpp \
+		$(SRC_LOADER)/farm_flow.c \
+		$(SRC_LOADER)/template_match.cpp \
+		$(SRC_LOADER)/game_input.c \
+		$(SRC_LOADER)/screen_capture_wgc.cpp \
+		-ld3d11 -ldxgi -lruntimeobject -lole32 -lgdi32 -luser32 \
+		$(OPENCV_LIBS)
+	@echo "[OK] Built $(BUILD_DIR)/test_flows.exe"
+
+# Xbox share-code popup diagnostic (enumerate windows + test input injection)
+test-popup-probe: dirs
+	$(CXX) -O2 -std=c++20 -mconsole -o $(BUILD_DIR)/test_popup_probe.exe \
+		$(TEST_DIR)/test_popup_probe.cpp \
+		-luser32 -lpsapi -lole32 -loleaut32
+	@echo "[OK] Built $(BUILD_DIR)/test_popup_probe.exe"
+	@echo "Run: $(BUILD_DIR)/test_popup_probe.exe [watch|list|children <hwnd>|post <hwnd> <digits>|sendinput <digits>]"
+
+# OCR economy calibration probe: dump all OCR words + coords, save frame
+test-economy: dirs
+	$(CXX) $(CXXFLAGS) $(OPENCV_CFLAGS) -mconsole -municode -I$(SRC_LOADER) \
+		-o $(BUILD_DIR)/test_economy.exe \
+		$(TEST_DIR)/test_economy.cpp \
+		$(SRC_LOADER)/farm_economy.c \
+		$(SRC_LOADER)/screen_capture_wgc.cpp \
+		$(SRC_LOADER)/ocr_engine_wrt.cpp \
+		-ld3d11 -ldxgi -lruntimeobject -lole32 -loleaut32 -lgdi32 -luser32 \
+		$(OPENCV_LIBS)
+	@echo "[OK] Built $(BUILD_DIR)/test_economy.exe"

@@ -1,0 +1,78 @@
+{
+  "_comment": "实机回归测试用例集。路径相对仓库根。run.ps1 读取本文件,通过 build/debug/cmd.txt 命令通道驱动 debug 版 FocusKeeper,断言 FocusKeeper.log 里程碑与 status.txt 结构化状态。每条用例的 expect/forbid/status_assert/manual 都绑定了历史真实 bug,改坏会当场抓住。",
+  "paths": {
+    "log": "build/FocusKeeper.log",
+    "cmd": "build/debug/cmd.txt",
+    "ack": "build/debug/cmd.ack",
+    "status": "build/debug/status.txt"
+  },
+  "done_marker": "流水线结束",
+  "cases": [
+    {
+      "name": "TC-READ",
+      "desc": "读取 CR/SP 经济值 (固化 CR 误读 8->3 回归)",
+      "setup": "把游戏切到主菜单的「车辆」tab(漫游中按 ESC 可进菜单)。",
+      "cmd": "read",
+      "timeout_s": 60,
+      "expect": ["\\[econ\\] CR=\\d{6,}", "SP=\\d+"],
+      "forbid": [],
+      "status_assert": ["balance>=100000"],
+      "manual": "日志里识别的 CR 数值,和游戏右上角实际余额是否完全一致?"
+    },
+    {
+      "name": "TC-RACE",
+      "desc": "赛事起跑流程 (固化起跑重试风暴 / 误进难度设置)",
+      "setup": "在工具「自动刷图」tab 选好 22B + 带分享码的赛事配置(659086805);游戏处于漫游或主菜单。",
+      "cmd": "race",
+      "timeout_s": 700,
+      "expect": ["race: start confirmed", "completed \\d+/\\d+", "\\[race\\] completed"],
+      "forbid": ["confirm #[4-9]", "start confirm exhausted", "retrying Enter"],
+      "status_assert": ["races>=1"],
+      "manual": "每一圈是否都正常按回车开赛进入比赛画面(没有误进「难度与设置」、没有空等卡死)?"
+    },
+    {
+      "name": "TC-BUY",
+      "desc": "批量买车 5 辆",
+      "setup": "确保 CR 足够买 5 辆消耗车;游戏处于主菜单。",
+      "cmd": "buy 5",
+      "timeout_s": 180,
+      "expect": ["buy_car: purchased 5/5", "流水线结束：买5"],
+      "forbid": [],
+      "status_assert": ["bought==5"],
+      "manual": ""
+    },
+    {
+      "name": "TC-SPIN",
+      "desc": "抽奖转盘 3 次",
+      "setup": "确保有可用的抽奖券/转盘入口;游戏处于主菜单。",
+      "cmd": "spin 3",
+      "timeout_s": 180,
+      "expect": ["流水线结束：.*抽3"],
+      "forbid": [],
+      "status_assert": ["spins==3"],
+      "manual": ""
+    },
+    {
+      "name": "TC-REMOVE",
+      "desc": "删车 3 辆 (固化误删涂装22B回归)",
+      "setup": "车库里要有可删的普通车,并确认跑图用的「带涂装的22B」也在车库。",
+      "cmd": "remove 3",
+      "timeout_s": 240,
+      "expect": ["流水线结束：.*删3"],
+      "forbid": [],
+      "status_assert": ["removed==3"],
+      "manual": "跑图用的带涂装 22B 是否还在车库(没有被误删)?"
+    },
+    {
+      "name": "TC-LOOP",
+      "desc": "完整循环冒烟(买->抽->删->赛 全流程跑通)",
+      "setup": "工具里勾选要循环的步骤、选好 22B + 赛事配置;游戏处于漫游或主菜单。",
+      "cmd": "loop",
+      "timeout_s": 1200,
+      "expect": ["流水线结束"],
+      "forbid": ["start confirm exhausted"],
+      "status_assert": [],
+      "manual": "整轮循环是否按预期跑完(无中途卡死、无误删)?"
+    }
+  ]
+}

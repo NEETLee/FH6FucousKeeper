@@ -40,6 +40,11 @@ void    Logger_Shutdown(void);
 /* Log a message at the specified level */
 void    Logger_Log(LogLevel level, const WCHAR *fmt, ...);
 
+/* Log to the FILE sink only (skips GUI/debug observer callbacks). Used for
+ * verbose pipeline step logs that should be persisted for offline inspection
+ * without flooding the global GUI log tab. */
+void    Logger_LogFileOnly(LogLevel level, const WCHAR *fmt, ...);
+
 /* Convenience macros */
 #define LOG_D(fmt, ...) Logger_Log(LOG_DEBUG, fmt, ##__VA_ARGS__)
 #define LOG_I(fmt, ...) Logger_Log(LOG_INFO,  fmt, ##__VA_ARGS__)

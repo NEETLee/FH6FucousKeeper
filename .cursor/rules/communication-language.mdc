@@ -1,0 +1,11 @@
+---
+description: Always communicate with the user in Chinese
+alwaysApply: true
+---
+
+# 沟通语言
+
+- 与用户的**所有对话**（解释、总结、提问、状态说明等）一律使用**简体中文**。
+- plan 正文（计划标题、阶段说明、todo 内容）也用**简体中文**。
+- 代码本身保持英文：标识符、代码注释、日志字符串、提交信息（commit message）等仍按原有英文约定，不强行翻译。
+- 引用文件名、函数名、命令、技术术语时可保留英文原文，但承载语句仍用中文。

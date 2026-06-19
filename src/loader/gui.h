@@ -80,4 +80,38 @@ void    Gui_ShowUpdateAvailable(const WCHAR *version, const WCHAR *url);
 /* Auto Race page: set profile description text */
 void    Gui_SetProfileDescription(const WCHAR *text);
 
+/* ─── Auto Wheelspin Farm pipeline (on the Auto Race page) ──────────── */
+
+/* Parameters read from the pipeline controls.
+ * Note: per-car CR/SP cost lives in the car profile; SP-per-lap lives in the
+ * race profile - neither is a GUI field anymore. */
+typedef struct {
+    int  race_laps;      /* manual fallback laps (kept for compatibility) */
+    int  cycles;
+    int  manual_count;   /* count for single-step buttons */
+    BOOL auto_count;
+    int  target_sp;      /* SP target (default 999) */
+    BOOL enable_race;
+    BOOL enable_buy;
+    BOOL enable_spin;
+    BOOL enable_remove;
+} GuiPipelineParams;
+
+/* Read the current pipeline parameter inputs. */
+void    Gui_GetPipelineParams(GuiPipelineParams *out);
+
+/* Update the economy/status panel (any string may be NULL). */
+void    Gui_SetPipelineEcon(int cr, int sp, int count,
+                            const WCHAR *stage, const WCHAR *totals);
+
+/* Append a line to the per-step pipeline log box (Auto Farm tab). */
+void    Gui_AppendPipelineLog(const WCHAR *text);
+
+/* Populate the car-profile combo and return the selected index (-1 none). */
+void    Gui_PopulateCarProfiles(const WCHAR names[][64], int count);
+int     Gui_GetSelectedCarProfile(void);
+
+/* Enable/disable pipeline buttons for the running state. */
+void    Gui_SetPipelineRunning(BOOL running);
+
 #endif /* FOCUSKEEPER_GUI_H */

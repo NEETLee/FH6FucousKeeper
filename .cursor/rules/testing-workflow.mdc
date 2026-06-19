@@ -1,0 +1,39 @@
+---
+description: How to verify the farm pipeline before release (live regression via the debug command channel). Read when testing the farm flow, validating a build, or before publishing a version.
+alwaysApply: false
+---
+
+# Farm 流水线测试方式 (实机回归)
+
+本项目**只做实机回归测试**,一切以真机为准(离线视觉回归无意义,别做)。
+目标:发版前可靠验证 farm 流水线有效,避免新版本带明显 bug。
+
+## 调试/测试控制通道 (仅 DEBUG 版)
+
+`make farm` 的 DEBUG 版内置文件命令通道。往 `build\debug\cmd.txt` 写一行命令,
+程序每 500ms 轮询执行,回写 `build\debug\cmd.ack`:
+
+- `read` / `race` / `buy N` / `spin N` / `remove N` / `loop` / `stop` / `quit`
+- `status` -> 把流水线状态写到 `build\debug\status.txt`
+  (running/bought/spins/removed/races/balance/sp/computed/stage)
+- `quit` 让程序优雅退出以释放 exe(等价于丢 `build\debug\stop.flag`)
+
+证据来源:`build\FocusKeeper.log`(里程碑日志,append + 会话横幅)、
+`build\debug\run_*\*.png`(各决策点快照,能直接看图)。
+
+## 一键回归
+
+```powershell
+pwsh tests/regression/run.ps1            # 全部用例
+pwsh tests/regression/run.ps1 -Only TC-RACE
+```
+
+用例定义在 `tests/regression/cases.json`(expect/forbid/status_assert/manual 绑定了
+历史 bug:起跑重试风暴、误删涂装22B、CR 误读)。操作员只摆游戏初始状态 + 个别肉眼复核。
+完整步骤与「如何加新用例」见 [tests/regression/README.md](../../tests/regression/README.md)。
+
+## 改了 C 代码后的循环
+
+1. 写 `quit` 到 `build\debug\cmd.txt` 让程序退出。
+2. `mingw32-make farm` 重建(DEBUG)。`make farm-release` 出不含调试特性的正式版。
+3. 重启 `build\FocusKeeper.exe`(点一次 UAC),再跑回归。

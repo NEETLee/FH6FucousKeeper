@@ -78,6 +78,40 @@ BOOL Logger_Init(const WCHAR *log_file_path)
     s_logger.log_file = INVALID_HANDLE_VALUE;
 
     if (log_file_path) {
+#ifdef FK_DEBUG
+        /* DEBUG: append across runs and tag each launch with a banner, so logs
+         * from a session that crashed survive the relaunch for inspection. */
+        s_logger.log_file = CreateFileW(
+            log_file_path,
+            FILE_APPEND_DATA,
+            FILE_SHARE_READ,
+            NULL,
+            OPEN_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL,
+            NULL
+        );
+        if (s_logger.log_file == INVALID_HANDLE_VALUE) {
+            s_logger.file_enabled = FALSE;
+        } else {
+            DWORD written;
+            LARGE_INTEGER sz = {0};
+            if (GetFileSizeEx(s_logger.log_file, &sz) && sz.QuadPart == 0) {
+                unsigned char bom[] = {0xEF, 0xBB, 0xBF};
+                WriteFile(s_logger.log_file, bom, 3, &written, NULL);
+            }
+            SYSTEMTIME st;
+            GetLocalTime(&st);
+            WCHAR banner[160];
+            int bl = _snwprintf(banner, 159,
+                L"\r\n==== session %04d-%02d-%02d %02d:%02d:%02d (FK_DEBUG) ====\r\n",
+                st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+            if (bl > 0) {
+                char u8[320];
+                int ul = WideCharToMultiByte(CP_UTF8, 0, banner, bl, u8, sizeof(u8), NULL, NULL);
+                if (ul > 0) WriteFile(s_logger.log_file, u8, ul, &written, NULL);
+            }
+        }
+#else
         s_logger.log_file = CreateFileW(
             log_file_path,
             GENERIC_WRITE,
@@ -97,6 +131,7 @@ BOOL Logger_Init(const WCHAR *log_file_path)
             unsigned char bom[] = {0xEF, 0xBB, 0xBF};
             WriteFile(s_logger.log_file, bom, 3, &written, NULL);
         }
+#endif
     } else {
         s_logger.file_enabled = FALSE;
     }
@@ -148,6 +183,26 @@ void Logger_Log(LogLevel level, const WCHAR *fmt, ...)
     WriteToFile(&entry);
     NotifyCallbacks(&entry);
 
+    LeaveCriticalSection(&s_logger.cs);
+}
+
+void Logger_LogFileOnly(LogLevel level, const WCHAR *fmt, ...)
+{
+    LogEntry entry;
+    va_list args;
+
+    if (!s_logger.initialized) return;
+
+    GetLocalTime(&entry.timestamp);
+    entry.level = level;
+
+    va_start(args, fmt);
+    _vsnwprintf(entry.message, 1023, fmt, args);
+    entry.message[1023] = L'\0';
+    va_end(args);
+
+    EnterCriticalSection(&s_logger.cs);
+    WriteToFile(&entry);
     LeaveCriticalSection(&s_logger.cs);
 }
 

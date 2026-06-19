@@ -74,6 +74,30 @@
 #define IDC_LBL_RACE_TIME   1086
 #define IDC_LBL_RACE_TIP    1087
 
+/* Auto Wheelspin Farm pipeline (upgraded Auto Race page) */
+#define IDC_PIPE_EDIT_LAPS   1100
+#define IDC_PIPE_EDIT_COST   1101
+#define IDC_PIPE_EDIT_SP     1102
+#define IDC_PIPE_EDIT_CYCLES 1103
+#define IDC_PIPE_EDIT_COUNT  1104
+#define IDC_PIPE_CHK_AUTO    1105
+#define IDC_PIPE_BTN_RACE    1106
+#define IDC_PIPE_BTN_READ    1107
+#define IDC_PIPE_BTN_BUY     1108
+#define IDC_PIPE_BTN_SPIN    1109
+#define IDC_PIPE_BTN_REMOVE  1110
+#define IDC_PIPE_BTN_LOOP    1111
+#define IDC_PIPE_BTN_STOP    1112
+#define IDC_PIPE_LBL_ECON    1113
+#define IDC_PIPE_COMBO_CAR      1114
+#define IDC_PIPE_EDIT_TARGET_SP 1115
+#define IDC_PIPE_EDIT_SP_LAP    1116
+#define IDC_PIPE_CHK_RACE       1117
+#define IDC_PIPE_CHK_BUY        1118
+#define IDC_PIPE_CHK_SPIN       1119
+#define IDC_PIPE_CHK_REMOVE     1120
+#define IDC_PIPE_LOG            1121
+
 /* Tray icon */
 #define IDI_APP_ICON        200
 #define IDI_TRAY_ACTIVE     201
