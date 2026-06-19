@@ -21,23 +21,22 @@ jobs:
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
-          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-cppwinrt make
+          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-cppwinrt mingw-w64-x86_64-opencv make upx
 
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Build
-        run: make
+        run: make farm-release
 
       - name: Package
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}"
-          New-Item -ItemType Directory -Path "release/profiles" -Force
-          Copy-Item "build/FocusKeeper.exe" "release/"
-          Copy-Item "build/hook.dll" "release/"
-          Copy-Item "build/profiles/*" "release/profiles/"
-          Compress-Archive -Path "release/*" -DestinationPath "FH6FocusKeeper-$tag.zip"
+          # dist/ already contains the full runnable package (exe + hook.dll +
+          # UPX-compressed runtime DLLs + assets + profiles), assembled by
+          # `make farm-release`. Zip its contents at the archive root.
+          Compress-Archive -Path "dist/*" -DestinationPath "FH6FocusKeeper-$tag.zip"
 
       - name: Extract release notes
         shell: pwsh
