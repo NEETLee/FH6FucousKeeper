@@ -23,8 +23,10 @@ Thumbs.db
 Desktop.ini
 .DS_Store
 
-# Cursor
-assets/
+# Cursor scratch assets, but keep the template images the farm pipeline needs
+# at runtime (template matching). Everything else under assets/ stays ignored.
+assets/*
+!assets/templates/
 
 # Regression test reports (generated at runtime)
 tests/regression/report_*.md
