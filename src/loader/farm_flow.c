@@ -986,6 +986,202 @@ static int start_menu_ocr(void) {
     return 0;
 }
 
+/* The EventLab "rate this blueprint" popup (点赞作者 / 点踩作者 / 赞标签 /
+ * 取消) hijacks all menu input and IGNORES Esc - it can only be cleared by
+ * clicking one of its buttons. It typically pops after crossing the finish
+ * line or when restarting, which is exactly when the race loop is either
+ * waiting for the start menu or about to drive, so an undetected popup hangs
+ * the whole flow (even the 200s timeout recovery uses Esc and can't escape).
+ *
+ * Dismiss it by CLICKING the 点赞 (like) button - harmless, and it closes the
+ * popup so the flow continues. Returns TRUE if a popup was found & dismissed. */
+static BOOL dismiss_social_popup(FarmEngine *fe) {
+    /* Detect the rating popup by OCR, NOT template matching: the 点赞/点踩
+     * templates are tiny 2-glyph labels that false-match all over the race HUD
+     * (multi-scale gray match), which spammed clicks mid-race and kicked the
+     * flow back to free-roam. The real popup is the ONLY place both "点赞" and
+     * "点踩" text appear together, so require both, then click the 点赞 glyph
+     * the OCR located (resolution-independent, no template). */
+    if (!OcrEngine_IsReady()) return FALSE;
+
+    CaptureFrame f = {0};
+    BOOL got = FALSE;
+    for (int i = 0; i < 2; i++) { if (ScreenCapture_GrabFrame(&f)) got = TRUE; Sleep(30); }
+    if (!got || !f.pixels) return FALSE;
+
+    RECT roi = { 0, 0, f.width, f.height };
+    static OcrResult r;
+    memset(&r, 0, sizeof(r));
+    if (!OcrEngine_RecognizeRegion(f.pixels, f.width, f.height, f.stride, roi, &r))
+        return FALSE;
+
+    /* Whitespace-stripped全文 confirms the popup (Windows OCR spaces CJK out). */
+    static WCHAR packed[OCR_MAX_TEXT_LEN * 8];
+    int pn = 0;
+    for (const WCHAR *p = r.all_text;
+         *p && pn < (int)(sizeof(packed) / sizeof(packed[0])) - 1; p++) {
+        if (*p != L' ' && *p != L'\t' && *p != L'\r' && *p != L'\n')
+            packed[pn++] = *p;
+    }
+    packed[pn] = 0;
+    if (!wcsstr(packed, L"点赞") || !wcsstr(packed, L"点踩"))
+        return FALSE;   /* not the rating popup */
+
+    /* Locate a word carrying the 赞 glyph to click the 点赞 button. */
+    int cx = -1, cy = -1;
+    for (int i = 0; i < r.line_count && cx < 0; i++) {
+        const OcrLine *line = &r.lines[i];
+        for (int j = 0; j < line->word_count; j++) {
+            const OcrWord *w = &line->words[j];
+            if (wcschr(w->text, L'赞')) {
+                cx = (w->bounds.left + w->bounds.right) / 2;
+                cy = (w->bounds.top + w->bounds.bottom) / 2;
+                break;
+            }
+        }
+    }
+    if (cx < 0) { GameInput_Press(fe->input, VK_RETURN, 80); }
+    else        { GameInput_Click(fe->input, cx, cy); }
+    farm_log(fe, "race: like popup dismissed (OCR 点赞)");
+    farm_sleep(fe, 1200);
+    return TRUE;
+}
+
+/* Copy `src` into `dst` with all whitespace removed and ASCII upper->lower,
+ * for case-insensitive substring matching. */
+static void pack_lower(const WCHAR *src, WCHAR *dst, int dstcap) {
+    int n = 0;
+    if (!src) { dst[0] = 0; return; }
+    for (const WCHAR *p = src; *p && n < dstcap - 1; p++) {
+        WCHAR c = *p;
+        if (c == L' ' || c == L'\t' || c == L'\r' || c == L'\n') continue;
+        if (c >= L'A' && c <= L'Z') c = (WCHAR)(c - L'A' + L'a');
+        dst[n++] = c;
+    }
+    dst[n] = 0;
+}
+
+/* OCR the cars currently visible and click the card matching the target.
+ * When want_pi > 0 the PI is MANDATORY: only a line containing that exact
+ * number is eligible, so we lock onto the one tuned/favorited car (PI 834)
+ * and never a freshly-bought stock 22B. The car name adds bonus score.
+ * Returns TRUE (and clicks) on a match. */
+static BOOL ocr_pick_car_on_page(FarmEngine *fe, const WCHAR *want, int want_pi,
+                                 const WCHAR *pi_str) {
+    CaptureFrame f = {0};
+    BOOL got = FALSE;
+    for (int i = 0; i < 2; i++) { if (ScreenCapture_GrabFrame(&f)) got = TRUE; Sleep(30); }
+    if (!got || !f.pixels) return FALSE;
+    /* Keep the TM frame in sync so debug snapshots show what OCR saw. */
+    TM_SetFrame(f.pixels, f.width, f.height, f.stride);
+
+    RECT roi = { 0, 0, f.width, f.height };
+    static OcrResult r;
+    memset(&r, 0, sizeof(r));
+    if (!OcrEngine_RecognizeRegion(f.pixels, f.width, f.height, f.stride, roi, &r))
+        return FALSE;
+
+    int best_score = 0, best_cx = 0, best_cy = 0;
+    for (int i = 0; i < r.line_count; i++) {
+        const OcrLine *line = &r.lines[i];
+        if (line->word_count <= 0) continue;
+        WCHAR lpack[OCR_MAX_TEXT_LEN];
+        pack_lower(line->full_text, lpack, OCR_MAX_TEXT_LEN);
+
+        BOOL has_pi = (want_pi > 0 && wcsstr(lpack, pi_str) != NULL);
+        if (want_pi > 0 && !has_pi) continue;   /* PI mandatory -> skip */
+
+        int score = has_pi ? 3 : 0;
+        const WCHAR *p = want ? want : L"";
+        while (*p) {
+            while (*p == L' ') p++;
+            WCHAR tok[64]; int tn = 0;
+            while (*p && *p != L' ' && tn < 63) tok[tn++] = *p++;
+            tok[tn] = 0;
+            if (tn >= 2) {
+                WCHAR tl[64]; pack_lower(tok, tl, 64);
+                if (tl[0] && wcsstr(lpack, tl)) score += 2;
+            }
+        }
+        if (score <= 0) continue;          /* need PI (when set) or a name hit */
+        if (score <= best_score) continue;
+
+        RECT b = line->words[0].bounds;
+        for (int j = 1; j < line->word_count; j++) {
+            RECT wb = line->words[j].bounds;
+            if (wb.left < b.left) b.left = wb.left;
+            if (wb.top < b.top) b.top = wb.top;
+            if (wb.right > b.right) b.right = wb.right;
+            if (wb.bottom > b.bottom) b.bottom = wb.bottom;
+        }
+        best_score = score;
+        best_cx = (b.left + b.right) / 2;
+        best_cy = (b.top + b.bottom) / 2;
+    }
+
+    if (best_score <= 0) return FALSE;
+    {
+        char msg[96];
+        snprintf(msg, sizeof(msg),
+                 "race: select car via OCR (%d,%d) score=%d", best_cx, best_cy, best_score);
+        farm_log(fe, msg);
+    }
+    GameInput_Click(fe->input, best_cx, best_cy);
+    farm_sleep(fe, 600);
+    return TRUE;
+}
+
+/* Select the farming car on the race car-select screen, resolution-independent.
+ *
+ * The wrong-car bug: remove_car favorites+drives a protected car (e.g. an
+ * AE86), which becomes the "current car", so the target 22B is no longer on the
+ * default page. We therefore: (0) try the current page, (1) jump to the
+ * manufacturer view (Backspace, the "前往制造商" hotkey) and pick Subaru
+ * (reusing the proven CCbrand tile nav from remove_car), then (2) OCR the
+ * Subaru cars - paging down - for the card whose PI == car_pi (the one tuned
+ * car), clicking it. Returns TRUE if the target was found and clicked. */
+static BOOL select_car_by_ocr(FarmEngine *fe) {
+    if (!OcrEngine_IsReady()) return FALSE;
+    const WCHAR *want = fe->cfg.car_name;
+    int want_pi = fe->cfg.car_pi;
+    if ((!want || !want[0]) && want_pi <= 0) return FALSE;
+
+    WCHAR pi_str[16];
+    _snwprintf(pi_str, 16, L"%d", want_pi > 0 ? want_pi : 0);
+
+    /* 0) Maybe the target is already on the current page. */
+    if (ocr_pick_car_on_page(fe, want, want_pi, pi_str)) return TRUE;
+
+    /* 1) Go to the manufacturer view and select Subaru. */
+    farm_log(fe, "race: target car not on page, opening manufacturer (Backspace)");
+    key(fe, VK_BACK, 80);
+    farm_sleep(fe, 1200);
+    TMResult brand = {0};
+    for (int a = 0; a < 6 && !check_stop(fe); a++) {
+        brand = wait_best(fe, "CCbrand.png", "full", 0.72, 800, 200);
+        if (brand.found) break;
+        key(fe, VK_UP, 80);
+        farm_sleep(fe, 300);
+    }
+    if (brand.found) {
+        farm_log(fe, "race: select Subaru brand (CCbrand)");
+        click1(fe, brand.cx, brand.cy);
+        farm_sleep(fe, 1200);
+    } else {
+        farm_log(fe, "race: Subaru brand tile not found (CCbrand), OCR on current view");
+    }
+
+    /* 2) OCR the brand's cars, paging down to find the PI-matched car. */
+    for (int pg = 0; pg < 5 && !check_stop(fe); pg++) {
+        if (ocr_pick_car_on_page(fe, want, want_pi, pi_str)) return TRUE;
+        FARM_SNAP(fe, "car_ocr_page", brand);
+        key(fe, VK_NEXT, 80);   /* page down within the car grid */
+        farm_sleep(fe, 900);
+    }
+    farm_log(fe, "race: OCR car-select found no PI/name match after paging");
+    return FALSE;
+}
+
 int Farm_Race(FarmEngine *fe, const char *share_code, int target_count) {
     if (!fe || check_stop(fe) || !share_code) return 0;
     int counter = 0;
@@ -1092,11 +1288,26 @@ int Farm_Race(FarmEngine *fe, const char *share_code, int target_count) {
     GameInput_Press(fe->input, VK_RETURN, 80);
     farm_sleep(fe, 2000);
 
-    /* Find skill car (simplified: just proceed with any car) */
-    TMResult car = wait_template(fe, "skillcar.png", 0.65, 5000, 300);
-    if (car.found) {
-        GameInput_Click(fe->input, car.cx, car.cy);
-        farm_sleep(fe, 500);
+    /* Select the farming car. Prefer OCR (name + PI from the profile): it is
+     * resolution-independent and always picks the RIGHT car, so a previous
+     * remove_car that left a favorited car as "current" no longer leaks the
+     * wrong car into the race. Fall back to the legacy skillcar.png template
+     * only if OCR is unavailable or finds no match. */
+    farm_sleep(fe, 800);  /* let the car grid settle before OCR */
+    if (!select_car_by_ocr(fe)) {
+        /* Fallback only on a STRONG skillcar match (>=0.85): a weak match grabs
+         * the wrong current car (e.g. the AE86 matched skillcar at 0.72), which
+         * is exactly the bug we're fixing - better to leave selection untouched
+         * than to actively pick the wrong car. */
+        TMResult car = wait_template(fe, "skillcar.png", 0.85, 4000, 300);
+        FARM_SNAP(fe, "car_select", car);
+        if (car.found) {
+            farm_log(fe, "race: select car via skillcar.png template (fallback)");
+            GameInput_Click(fe->input, car.cx, car.cy);
+            farm_sleep(fe, 500);
+        } else {
+            farm_log(fe, "race: car-select fell through (no strong match), using current car");
+        }
     }
     GameInput_Press(fe->input, VK_RETURN, 80);
     farm_sleep(fe, 4000);
@@ -1169,6 +1380,11 @@ int Farm_Race(FarmEngine *fe, const char *share_code, int target_count) {
 
             if (ocr != 1 && tscore < press_bar) {
                 if (tscore >= 0.55) settle_waits++;  /* present but not settled yet */
+                /* The start menu may be blocked by the like-blueprint popup
+                 * (Esc can't clear it). Probe & dismiss every ~2s while we wait
+                 * so the menu can finally render instead of hanging forever. */
+                if ((i % 5) == 0 && dismiss_social_popup(fe))
+                    continue;  /* re-scan immediately after clearing the popup */
                 if ((i % 5) == 0) {
                     snprintf(msg, sizeof(msg),
                              "race: waiting for start menu (ocr=%d t=%.2f)", ocr, tscore);
@@ -1239,15 +1455,9 @@ int Farm_Race(FarmEngine *fe, const char *share_code, int target_count) {
             DWORD elapsed = GetTickCount() - race_start;
             if (elapsed > 200000) { timeout = TRUE; break; }
 
-            /* Check for like/dislike popup every ~3s */
-            if (elapsed % 3000 < 400) {
-                grab(fe);
-                TMResult la = TM_FindImageGray(tmpl(fe, "likeauthor.png"), 0.65, FALSE);
-                if (!la.found) la = TM_FindImageGray(tmpl(fe, "dislikeauthor.png"), 0.65, FALSE);
-                if (la.found) {
-                    GameInput_Press(fe->input, VK_RETURN, 80);
-                }
-            }
+            /* NOTE: no popup check while driving - the rating popup only appears
+             * AFTER the finish line, and probing it here false-matched the HUD.
+             * It is handled at the finish and during the next start-menu wait. */
 
             /* Check for restart (finish) every ~1s */
             if (elapsed % 1000 < 400) {
@@ -1281,6 +1491,10 @@ int Farm_Race(FarmEngine *fe, const char *share_code, int target_count) {
 
         if (!finished) return counter;
 
+        /* The like-blueprint popup most often fires right at the finish line,
+         * before the restart menu - clear it first so X/Enter hit the menu. */
+        dismiss_social_popup(fe);
+
         /* Finish: restart race */
         if (counter < target_count - 1) {
             GameInput_Press(fe->input, 'X', 80); /* restart option */
@@ -1290,6 +1504,8 @@ int Farm_Race(FarmEngine *fe, const char *share_code, int target_count) {
             GameInput_Press(fe->input, VK_RETURN, 80);
         }
         farm_sleep(fe, 2000);
+        /* ...and it can also pop *after* confirming restart. */
+        dismiss_social_popup(fe);
 
         counter++;
         snprintf(msg, sizeof(msg), "race: completed %d/%d", counter, target_count);

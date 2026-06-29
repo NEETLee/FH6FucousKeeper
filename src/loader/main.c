@@ -151,6 +151,34 @@ static int RaceProfileSpPerLap(void) {
     return (int)GetPrivateProfileIntW(L"Profile", L"SPPerLap", 0, full);
 }
 
+/* Farming car identity for OCR-based selection, from the race profile's
+ * [Profile] CarName / CarPI keys. Falls back to the selected car profile's
+ * display name when CarName is absent, so existing profiles keep working. */
+static void RaceProfileCarName(WCHAR *out, int out_len) {
+    if (!out || out_len <= 0) return;
+    out[0] = L'\0';
+    WCHAR sel[PROFILE_NAME_LEN] = {0};
+    Gui_GetSelectedProfile(sel, PROFILE_NAME_LEN);
+    if (sel[0]) {
+        WCHAR full[MAX_PATH];
+        _snwprintf(full, MAX_PATH, L"%s%s", Profile_GetDirectory(), sel);
+        GetPrivateProfileStringW(L"Profile", L"CarName", L"", out, out_len, full);
+    }
+    if (!out[0]) {
+        const CarProfile *car = SelectedCar();
+        if (car) wcsncpy(out, car->name, out_len - 1);
+    }
+}
+
+static int RaceProfileCarPI(void) {
+    WCHAR sel[PROFILE_NAME_LEN] = {0};
+    Gui_GetSelectedProfile(sel, PROFILE_NAME_LEN);
+    if (!sel[0]) return 0;
+    WCHAR full[MAX_PATH];
+    _snwprintf(full, MAX_PATH, L"%s%s", Profile_GetDirectory(), sel);
+    return (int)GetPrivateProfileIntW(L"Profile", L"CarPI", 0, full);
+}
+
 /* EventLab share code for the vision race step (UTF-8, digits only).
  * Source priority: the selected race profile's [Profile] ShareCode key; if that
  * is empty, the profile file name itself (the .ini is named after the code). */
@@ -312,6 +340,8 @@ static void StartPipelineJob(BOOL full_loop, PipelineStep step, int count) {
         for (int i = 0; i < car->skill_count && i < 16; i++)
             fc.skill_dirs[i] = car->skill_dirs[i];
     }
+    RaceProfileCarName(fc.car_name, 64);
+    fc.car_pi = RaceProfileCarPI();
     if (!Pipeline_Init(s_pipeline, &cfg, &fc)) {
         LOG_E(L"Pipeline init failed");
         Gui_SetPipelineEcon(-1, -1, -1,

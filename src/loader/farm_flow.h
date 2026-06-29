@@ -38,6 +38,12 @@ typedef struct {
     /* Per-car mastery skill-tree path (VK codes). Empty -> built-in 22B path. */
     DWORD        skill_dirs[16];
     int          skill_count;
+    /* Farming car identity for OCR-based selection on the race car-select
+     * screen (resolution-independent, no per-car template needed). The race
+     * step looks for a car card whose text matches car_name (name tokens) and
+     * car_pi (performance index). Empty name + car_pi<=0 -> template fallback. */
+    WCHAR        car_name[64];
+    int          car_pi;
 } FarmConfig;
 
 BOOL Farm_Init(FarmEngine *fe, const FarmConfig *cfg);
