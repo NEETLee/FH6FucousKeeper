@@ -21,7 +21,7 @@ jobs:
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
-          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-cppwinrt mingw-w64-x86_64-opencv make upx
+          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-cppwinrt mingw-w64-x86_64-opencv mingw-w64-x86_64-pkgconf make upx
 
       - name: Checkout
         uses: actions/checkout@v4

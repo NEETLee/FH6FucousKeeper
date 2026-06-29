@@ -26,9 +26,18 @@ CXXFLAGS += -D_WIN32_WINNT=0x0A00 -DNTDDI_VERSION=0x0A000007
 CXXFLAGS += -I./src -I./src/loader -I./res
 CXXFLAGS += -Wno-cast-function-type
 
-# OpenCV flags (MSYS2 MINGW64: pacman -S mingw-w64-x86_64-opencv)
-OPENCV_CFLAGS = -IC:/msys64/mingw64/include/opencv4
-OPENCV_LIBS = -LC:/msys64/mingw64/lib -lopencv_imgproc -lopencv_imgcodecs -lopencv_core
+# OpenCV flags (MSYS2 MINGW64: pacman -S mingw-w64-x86_64-opencv).
+# Resolve via pkg-config so it works regardless of where MSYS2 is installed
+# (e.g. the GitHub Actions runner is NOT at C:/msys64). Fall back to the default
+# local MINGW64 location only if pkg-config/opencv4.pc is unavailable.
+OPENCV_CFLAGS := $(shell pkg-config --cflags opencv4 2>/dev/null)
+OPENCV_LIBS := $(shell pkg-config --libs opencv4 2>/dev/null)
+ifeq ($(strip $(OPENCV_CFLAGS)),)
+OPENCV_CFLAGS := -IC:/msys64/mingw64/include/opencv4
+endif
+ifeq ($(strip $(OPENCV_LIBS)),)
+OPENCV_LIBS := -LC:/msys64/mingw64/lib -lopencv_imgproc -lopencv_imgcodecs -lopencv_core
+endif
 
 # Linker flags
 LDFLAGS_DLL = -shared -Wl,--out-implib,build/libhook.a
