@@ -18,7 +18,10 @@ const EconRect ECON_REGION_SKILL   = { 0.220f, 0.665f, 0.260f, 0.140f };
 
 #define ECON_CR_MIN_DIGITS 4
 #define ECON_CR_MIN  1000L
-#define ECON_CR_MAX  2000000000L
+/* FH6 caps credits at 999,999,999 (9 digits). Anything larger is by definition
+ * a misread (e.g. a 10-digit OCR garble like 1357057616), so we reject it and
+ * fall back / re-read instead of treating it as a valid balance. */
+#define ECON_CR_MAX  999999999L
 
 static BOOL s_ready = FALSE;
 
@@ -55,6 +58,17 @@ static int DigitCount(const WCHAR *text) {
     for (const WCHAR *p = text; *p; p++)
         if (*p >= L'0' && *p <= L'9') n++;
     return n;
+}
+
+/* TRUE if the token contains an ASCII letter (e.g. a player name like
+ * "WhoAreU4387"). Such tokens are never a pure CR/SP number, so they must
+ * not contribute digits to the parsed value even if their bounding box
+ * overlaps the OCR strip. */
+static BOOL HasAsciiLetter(const WCHAR *text) {
+    for (const WCHAR *p = text; *p; p++)
+        if ((*p >= L'a' && *p <= L'z') || (*p >= L'A' && *p <= L'Z'))
+            return TRUE;
+    return FALSE;
 }
 
 static RECT EconRectToPixels(EconRect roi, int width, int height) {
@@ -97,6 +111,31 @@ static BYTE *UpscaleBgra(const BYTE *src, int w, int h, int src_stride,
     return dst;
 }
 
+/* Binarize a BGRA buffer in place: bright HUD text (high luminance) becomes
+ * black on a white background. White digits on a coloured tile (e.g. white
+ * "944" on teal) are low-contrast for WinOCR and get partially dropped
+ * (944 -> 4); thresholding to clean black-on-white fixes that. */
+static void BinarizeBgra(BYTE *buf, int w, int h, int stride, int threshold) {
+    for (int y = 0; y < h; y++) {
+        BYTE *row = buf + (size_t)y * stride;
+        for (int x = 0; x < w; x++) {
+            BYTE *p = row + x * 4;
+            int lum = (p[2] * 299 + p[1] * 587 + p[0] * 114) / 1000; /* BGRA */
+            BYTE v = (lum >= threshold) ? 0 : 255;  /* bright text -> black */
+            p[0] = p[1] = p[2] = v;
+            p[3] = 255;
+        }
+    }
+}
+
+/* Decimal digit count of a non-negative value (0 counts as 1). */
+static int DecDigits(int v) {
+    if (v <= 0) return 1;
+    int n = 0;
+    while (v > 0) { n++; v /= 10; }
+    return n;
+}
+
 typedef struct { LONG x; WCHAR text[64]; } SortWord;
 
 static int cmp_sortword_x(const void *a, const void *b) {
@@ -115,6 +154,7 @@ static int ParseResultDigits(const OcrResult *result, int min_digits) {
         for (int j = 0; j < line->word_count; j++) {
             const OcrWord *w = &line->words[j];
             if (DigitCount(w->text) < 1) continue;
+            if (HasAsciiLetter(w->text)) continue;  /* skip names like WhoAreU4387 */
             if (n < (int)(sizeof(words) / sizeof(words[0]))) {
                 words[n].x = w->bounds.left;
                 wcsncpy(words[n].text, w->text, 63);
@@ -138,12 +178,40 @@ static int ParseResultDigits(const OcrResult *result, int min_digits) {
     return ParseInt(joined);
 }
 
+/* Candidate-selection strategy. CR and SP fail in OPPOSITE ways, so they need
+ * opposite reconciliations across the OCR methods (direct / upscale / binarize):
+ *   MODE     - pick the most frequently agreed value (CR: the raw passes read
+ *              the long number correctly and outvote a binarize garble).
+ *   MAXDIGITS- pick the read with the most digits (SP: raw passes drop digits
+ *              e.g. 944->4, and only the binarized pass recovers the full 944). */
+#define ECON_SEL_MODE      0
+#define ECON_SEL_MAXDIGITS 1
+
+static int SelectCandidate(const int *c, int n, int select) {
+    int best = -1, bestK1 = -1, bestK2 = -1;
+    for (int i = 0; i < n; i++) {
+        int v = c[i];
+        int freq = 0;
+        for (int j = 0; j < n; j++) if (c[j] == v) freq++;
+        int dig = DecDigits(v);
+        int k1 = (select == ECON_SEL_MODE) ? freq : dig;
+        int k2 = (select == ECON_SEL_MODE) ? dig  : freq;
+        if (k1 > bestK1 || (k1 == bestK1 && (k2 > bestK2 ||
+            (k2 == bestK2 && v > best)))) {
+            bestK1 = k1; bestK2 = k2; best = v;
+        }
+    }
+    return best;
+}
+
 /*
  * Crop an explicit pixel RECT, optionally upscale, OCR only that patch.
  * Shared core for both the normalized-ROI and anchor-based read paths.
+ * Runs up to 3 OCR methods (direct, upscale, upscale+binarize) and reconciles
+ * the parsed values per `select` (ECON_SEL_*).
  */
 static int ReadNumberRect(const BYTE *pixels, int width, int height, int stride,
-                          RECT rc, int upscale, int min_digits) {
+                          RECT rc, int upscale, int min_digits, int select) {
     if (!s_ready || !pixels || width <= 0 || height <= 0) return -1;
 
     if (rc.left < 0) rc.left = 0;
@@ -155,70 +223,83 @@ static int ReadNumberRect(const BYTE *pixels, int width, int height, int stride,
     int rh = rc.bottom - rc.top;
     if (rw < 8 || rh < 4) return -1;
 
+    int cand[4]; int ncand = 0;
+    #define ECON_CONSIDER(v) do {                                        \
+        int _v = (v);                                                    \
+        if (_v >= 1 && _v <= (int)ECON_CR_MAX &&                         \
+            DecDigits(_v) >= min_digits &&                               \
+            ncand < (int)(sizeof(cand)/sizeof(cand[0])))                 \
+            cand[ncand++] = _v;                                          \
+    } while (0)
+
     static OcrResult result;
 
-    /* Pass 1: direct region OCR (no upscale). */
-    if (OcrEngine_RecognizeRegion(pixels, width, height, stride, rc, &result)) {
-        int val = ParseResultDigits(&result, min_digits);
-        if (val >= (int)ECON_CR_MIN && val <= (int)ECON_CR_MAX) return val;
-        if (min_digits <= 1 && val >= 0) return val;
-    }
+    /* Method 1: direct region OCR (no upscale). */
+    if (OcrEngine_RecognizeRegion(pixels, width, height, stride, rc, &result))
+        ECON_CONSIDER(ParseResultDigits(&result, min_digits));
 
-    /* Pass 2: crop + upscale + OCR (better for small white digits). */
+    /* Methods 2 & 3: crop + upscale, then a binarized variant. */
     int crop_stride = rw * 4;
     BYTE *crop = (BYTE *)malloc((size_t)crop_stride * (size_t)rh);
-    if (!crop) return -1;
+    if (crop) {
+        for (int y = 0; y < rh; y++) {
+            const BYTE *src = pixels + (rc.top + y) * stride + rc.left * 4;
+            memcpy(crop + y * crop_stride, src, (size_t)crop_stride);
+        }
+        if (upscale < 2) upscale = 2;
+        int uw, uh, ustride;
+        BYTE *up = UpscaleBgra(crop, rw, rh, crop_stride, upscale, &uw, &uh, &ustride);
+        if (up) {
+            memset(&result, 0, sizeof(result));
+            if (OcrEngine_Recognize(up, uw, uh, ustride, &result))
+                ECON_CONSIDER(ParseResultDigits(&result, min_digits));
 
-    for (int y = 0; y < rh; y++) {
-        const BYTE *src = pixels + (rc.top + y) * stride + rc.left * 4;
-        memcpy(crop + y * crop_stride, src, (size_t)crop_stride);
+            /* Binarized variant: clean black-on-white for low-contrast digits. */
+            BinarizeBgra(up, uw, uh, ustride, 185);
+            memset(&result, 0, sizeof(result));
+            if (OcrEngine_Recognize(up, uw, uh, ustride, &result))
+                ECON_CONSIDER(ParseResultDigits(&result, min_digits));
+
+            free(up);
+        }
+        free(crop);
     }
 
-    if (upscale < 2) upscale = 2;
-    int uw, uh, ustride;
-    BYTE *up = UpscaleBgra(crop, rw, rh, crop_stride, upscale, &uw, &uh, &ustride);
-    free(crop);
-    if (!up) return -1;
-
-    memset(&result, 0, sizeof(result));
-    if (OcrEngine_Recognize(up, uw, uh, ustride, &result)) {
-        int val = ParseResultDigits(&result, min_digits);
-        free(up);
-        if (val >= (int)ECON_CR_MIN && val <= (int)ECON_CR_MAX) return val;
-        if (min_digits <= 1 && val >= 0) return val;
-    } else {
-        free(up);
-    }
-
-    return -1;
+    #undef ECON_CONSIDER
+    return SelectCandidate(cand, ncand, select);
 }
 
 /* Normalized-ROI wrapper over the pixel-RECT core. */
 static int ReadCroppedNumber(const BYTE *pixels, int width, int height, int stride,
-                             EconRect roi, int upscale, int min_digits) {
+                             EconRect roi, int upscale, int min_digits, int select) {
     RECT rc = EconRectToPixels(roi, width, height);
-    return ReadNumberRect(pixels, width, height, stride, rc, upscale, min_digits);
+    return ReadNumberRect(pixels, width, height, stride, rc, upscale, min_digits, select);
 }
 
 int FarmEconomy_ReadNumberRectPx(const BYTE *pixels, int width, int height, int stride,
                                  RECT rc, int upscale, int min_digits) {
-    return ReadNumberRect(pixels, width, height, stride, rc, upscale, min_digits);
+    /* CR (large number): raw passes are reliable, so trust the majority vote. */
+    return ReadNumberRect(pixels, width, height, stride, rc, upscale, min_digits,
+                          ECON_SEL_MODE);
 }
 
 int FarmEconomy_ReadNumber(const BYTE *pixels, int width, int height,
                            int stride, EconRect roi) {
-    return ReadCroppedNumber(pixels, width, height, stride, roi, 2, 1);
+    return ReadCroppedNumber(pixels, width, height, stride, roi, 2, 1,
+                             ECON_SEL_MAXDIGITS);
 }
 
 int FarmEconomy_ReadBalance(const BYTE *pixels, int width, int height, int stride) {
-    /* 3x upscale on the CR strip; require >= 4 digits. */
+    /* 3x upscale on the CR strip; require >= 4 digits; majority vote. */
     return ReadCroppedNumber(pixels, width, height, stride,
-                             ECON_REGION_BALANCE, 3, ECON_CR_MIN_DIGITS);
+                             ECON_REGION_BALANCE, 3, ECON_CR_MIN_DIGITS,
+                             ECON_SEL_MODE);
 }
 
 int FarmEconomy_ReadSkillPoints(const BYTE *pixels, int width, int height, int stride) {
+    /* SP (small number): raw passes drop digits; prefer the most-digits read. */
     return ReadCroppedNumber(pixels, width, height, stride,
-                             ECON_REGION_SKILL, 2, 1);
+                             ECON_REGION_SKILL, 2, 1, ECON_SEL_MAXDIGITS);
 }
 
 int FarmEconomy_ComputeCount(long balance, long skill_points,

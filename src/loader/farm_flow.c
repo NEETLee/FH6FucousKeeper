@@ -1491,6 +1491,12 @@ int Farm_Race(FarmEngine *fe, const char *share_code, int target_count) {
 
         if (!finished) return counter;
 
+        /* Let the finish/results screen settle so the skill-point tally is fully
+         * BANKED before we restart. Pressing X too early can abandon the run
+         * with skill points still un-credited, so the session ends up short of
+         * the SP target ("doesn't reach 999"). */
+        farm_sleep(fe, 1500);
+
         /* The like-blueprint popup most often fires right at the finish line,
          * before the restart menu - clear it first so X/Enter hit the menu. */
         dismiss_social_popup(fe);

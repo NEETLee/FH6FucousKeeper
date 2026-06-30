@@ -100,6 +100,12 @@ static int read_cr_anchored(FarmPipeline *pp, const CaptureFrame *f) {
             rc.bottom = icon.y + icon.h + pad;
             int val = FarmEconomy_ReadNumberRectPx(f->pixels, f->width, f->height,
                                                    f->stride, rc, 4, 4);
+#ifdef FK_DEBUG
+            /* Snapshot the exact CR strip we OCR'd, so a misread can be
+             * diagnosed from the saved frame (box drawn on the strip). */
+            TM_DebugSnap("econ_cr", val, rc.left, rc.top,
+                         rc.right - rc.left, rc.bottom - rc.top);
+#endif
             if (val >= 1000) {
                 char msg[96];
                 snprintf(msg, sizeof(msg),
@@ -136,17 +142,46 @@ BOOL Pipeline_ReadEconomyValues(FarmPipeline *pp, int *out_cr, int *out_sp) {
 
     CaptureFrame f = {0};
     int cr = -1, sp = -1;
-    if (grab_fresh(&f) && f.pixels) {
-        cr = read_cr_anchored(pp, &f);
-        sp = FarmEconomy_ReadSkillPoints(f.pixels, f.width, f.height, f.stride);
-    } else {
-        farm_log(pp, "[econ] screen capture failed");
+    /* Sample a few frames and reconcile. HUD OCR can flicker (white text on a
+     * bright tile) and occasionally drop digits (observed: 944 -> 4). The SP
+     * crop contains only the SP number, and a misread only ever drops digits
+     * (yielding a SMALLER value), so taking the max across samples recovers the
+     * true value. CR keeps the first plausible read. A short settle up front
+     * also avoids reading a transient post-race/animation frame. */
+    for (int s = 0; s < 3 && !pp->stop_requested; s++) {
+        Sleep(s == 0 ? 450 : 250);
+        if (!grab_fresh(&f) || !f.pixels) {
+            farm_log(pp, "[econ] screen capture failed");
+            continue;
+        }
+        int c = read_cr_anchored(pp, &f);
+        int p = FarmEconomy_ReadSkillPoints(f.pixels, f.width, f.height, f.stride);
+        if (c >= 0 && cr < 0) cr = c;          /* first plausible CR */
+        if (p > sp && p <= 99999) sp = p;      /* max plausible SP */
+        if (cr >= 0 && sp > 0 && s >= 1) break; /* have both after >=2 samples */
     }
 
     if (cr < 0) farm_log(pp, "[econ] CR unreadable");
     if (sp < 0) farm_log(pp, "[econ] SP unreadable (need 车辆 tab)");
 
-    if (cr < 0 || cr > (int)2000000000L) cr = -1;
+#ifdef FK_DEBUG
+    /* Diagnostic snapshots: the full econ frame plus the SP crop box, so a
+     * misread (wrong region vs. bad OCR) can be told apart from the saved PNG.
+     * (The CR strip box is snapped inside read_cr_anchored.) */
+    if (f.pixels) {
+        TM_SetFrame(f.pixels, f.width, f.height, f.stride);
+        RECT sprc;
+        sprc.left   = (LONG)(ECON_REGION_SKILL.x * f.width);
+        sprc.top    = (LONG)(ECON_REGION_SKILL.y * f.height);
+        sprc.right  = (LONG)((ECON_REGION_SKILL.x + ECON_REGION_SKILL.w) * f.width);
+        sprc.bottom = (LONG)((ECON_REGION_SKILL.y + ECON_REGION_SKILL.h) * f.height);
+        TM_DebugSnap("econ_sp", sp, sprc.left, sprc.top,
+                     sprc.right - sprc.left, sprc.bottom - sprc.top);
+        TM_DebugSnap("econ_full", cr, 0, 0, 0, 0);
+    }
+#endif
+
+    if (cr < 0 || cr > 999999999) cr = -1;  /* FH6 caps CR at 999,999,999 */
 
     EnterCriticalSection(&pp->cs);
     pp->status.last_balance = cr;
@@ -184,51 +219,37 @@ int Pipeline_ReadEconomy(FarmPipeline *pp) {
                  "[econ] CR=? SP=%d -> count=%d (cost=%ld sp/car=%ld)",
                  sp, n, cost, spc);
     farm_log(pp, msg);
+
+    /* Explain a zero count so a skipped cycle is never mistaken for a freeze. */
+    if (n == 0) {
+        long by_cr = (cr >= 0) ? (cr / cost) : -1;
+        long by_sp = (sp >= 0) ? (sp / spc)  : -1;
+        if (cr < 0 && sp < 0)
+            farm_log(pp, "[econ] count=0: CR/SP both unreadable -> buy/spin/remove skipped this cycle");
+        else if (by_sp == 0)
+            farm_log(pp, "[econ] count=0: SP below sp/car -> buy/spin/remove skipped (need more skill points)");
+        else if (by_cr == 0)
+            farm_log(pp, "[econ] count=0: CR below cost/car -> buy/spin/remove skipped (not enough credits)");
+    }
     return n;
 }
 
 /* ─── Race (timed script via host callbacks) ─────────────────────────── */
 
-/* Decide how many laps to run this race step:
- *  - sp_per_lap > 0: read current SP, run ceil((target_sp - SP)/sp_per_lap).
- *    Returns 0 when SP already meets the target (race can be skipped).
- *  - otherwise: the manual race_target_laps (default 3). */
-static int compute_race_laps(FarmPipeline *pp) {
-    int manual = pp->cfg.race_target_laps > 0 ? pp->cfg.race_target_laps : 3;
-    if (pp->cfg.sp_per_lap <= 0 || pp->cfg.target_sp <= 0)
-        return manual;
-
-    int cr = -1, sp = -1;
-    Pipeline_ReadEconomyValues(pp, &cr, &sp);
-    if (sp < 0) {
-        farm_log(pp, "[race] SP unreadable, using manual lap count");
-        return manual;
-    }
-    int deficit = pp->cfg.target_sp - sp;
-    if (deficit <= 0) return 0; /* already at/above target */
-    int laps = (deficit + pp->cfg.sp_per_lap - 1) / pp->cfg.sp_per_lap;
-    char msg[128];
-    snprintf(msg, sizeof(msg),
-             "[race] SP=%d target=%d /lap=%d -> %d laps",
-             sp, pp->cfg.target_sp, pp->cfg.sp_per_lap, laps);
-    farm_log(pp, msg);
-    return laps;
-}
-
 /* Vision-based race step: navigate to EventLab, submit the share code via UIA,
- * then run `target` races (each finishes with an X-restart). `target` is the
- * SP-derived lap count (or the manual fallback). */
+ * then run races (each finishes with an X-restart).
+ *
+ * SP-target mode (sp_per_lap > 0 && target_sp > 0): CLOSED LOOP. Race a batch
+ * sized to the current SP deficit, then re-read SP and repeat until the target
+ * is met (or a safety cap). This corrects per-lap SP variance and any points
+ * lost on restart, instead of trusting a single open-loop estimate -- which is
+ * why a session could finish short of the target ("doesn't reach 999").
+ * Otherwise: open-loop, race the manual race_target_laps. */
 static int run_race(FarmPipeline *pp) {
-    int target = compute_race_laps(pp);
-    if (target <= 0) {
-        farm_log(pp, "[race] SP already at target, skipping race");
-        return 0;
-    }
     if (!pp->cfg.share_code[0]) {
         farm_log(pp, "[race] no share code configured, skipping race");
         return 0;
     }
-
     FarmEngine *fe = ensure_engine(pp);
     if (!fe) {
         farm_log(pp, "[race] engine init failed");
@@ -236,12 +257,60 @@ static int run_race(FarmPipeline *pp) {
     }
     update_step(pp, "race");
 
-    int done = Farm_Race(fe, pp->cfg.share_code, target);
+    char msg[128];
 
-    char msg[96];
-    snprintf(msg, sizeof(msg), "[race] completed %d/%d races", done, target);
+    /* Manual / no-SP-target mode: fixed open-loop lap count. */
+    if (pp->cfg.sp_per_lap <= 0 || pp->cfg.target_sp <= 0) {
+        int target = pp->cfg.race_target_laps > 0 ? pp->cfg.race_target_laps : 3;
+        int done = Farm_Race(fe, pp->cfg.share_code, target);
+        snprintf(msg, sizeof(msg), "[race] completed %d/%d races", done, target);
+        farm_log(pp, msg);
+        return done;
+    }
+
+    /* SP-target closed loop. */
+    const int MAX_BATCHES    = 4;
+    const int MAX_TOTAL_LAPS = 30;   /* hard cap: a bad SP read can't run away */
+    int total_done = 0;
+    for (int batch = 0; batch < MAX_BATCHES && !pp->stop_requested; batch++) {
+        int cr = -1, sp = -1;
+        Pipeline_ReadEconomyValues(pp, &cr, &sp);
+
+        if (sp < 0) {
+            if (total_done > 0) {
+                farm_log(pp, "[race] SP unreadable, stopping race batches");
+                break;
+            }
+            int target = pp->cfg.race_target_laps > 0 ? pp->cfg.race_target_laps : 3;
+            farm_log(pp, "[race] SP unreadable, using manual lap count");
+            total_done += Farm_Race(fe, pp->cfg.share_code, target);
+            break;
+        }
+
+        int deficit = pp->cfg.target_sp - sp;
+        if (deficit <= 0) {
+            farm_log(pp, total_done == 0 ? "[race] SP already at target, skipping race"
+                                         : "[race] SP target reached");
+            break;
+        }
+
+        int laps = (deficit + pp->cfg.sp_per_lap - 1) / pp->cfg.sp_per_lap;
+        if (total_done + laps > MAX_TOTAL_LAPS) laps = MAX_TOTAL_LAPS - total_done;
+        if (laps <= 0) { farm_log(pp, "[race] lap cap reached"); break; }
+
+        snprintf(msg, sizeof(msg),
+                 "[race] SP=%d target=%d /lap=%d -> %d laps (batch %d)",
+                 sp, pp->cfg.target_sp, pp->cfg.sp_per_lap, laps, batch + 1);
+        farm_log(pp, msg);
+
+        int done = Farm_Race(fe, pp->cfg.share_code, laps);
+        total_done += done;
+        if (done <= 0) { farm_log(pp, "[race] race made no progress, stopping"); break; }
+    }
+
+    snprintf(msg, sizeof(msg), "[race] total %d races this step", total_done);
     farm_log(pp, msg);
-    return done;
+    return total_done;
 }
 
 /* ─── Single step ────────────────────────────────────────────────────── */
