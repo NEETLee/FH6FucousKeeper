@@ -5,6 +5,11 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.3.3] - 2026-07-01
+
+### 修复
+- **修复游戏偶发「永久静音」**：修复了一个偶现 bug——某些情况下点过静音后，即便再点取消静音、系统音量混音器里也显示游戏音量已恢复，但游戏依然没有声音。根因是同一个游戏进程可能同时存在多个音频会话，而工具此前只处理枚举到的第一个会话且会话枚举顺序并不固定，导致某个会话被遗留在静音状态（这一遍静音 A、下一遍却恢复了 B）。现在会对该进程的全部音频会话统一静音 / 取消静音，不再有会话被遗留。
+
 ## [1.3.2] - 2026-06-30
 
 围绕全自动刷图大循环的稳定性修复，重点解决「读数读错把流程卡住」和「技术点刷不满目标」两类问题。
@@ -82,6 +87,7 @@
 - 作者签名、GitHub 仓库链接、窗口模式使用提示。
 - 基于 GitHub Actions 的自动构建与发布流水线。
 
+[1.3.3]: https://github.com/NEETLee/FH6FucousKeeper/compare/v1.3.2...v1.3.3
 [1.3.2]: https://github.com/NEETLee/FH6FucousKeeper/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/NEETLee/FH6FucousKeeper/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/NEETLee/FH6FucousKeeper/compare/v1.2.1...v1.3.0
