@@ -431,6 +431,11 @@ BOOL Farm_GotoStoryTab(FarmEngine *fe) {
 int Farm_BuyCar(FarmEngine *fe, int target_count) {
     if (!fe || check_stop(fe)) return 0;
 
+    /* Per-call counter: the engine is reused across pipeline cycles / jobs,
+     * so a leftover value from a previous buy would skip the purchase loop
+     * (navigate + select car, then exit without buying). */
+    fe->car_counter = 0;
+
     char msg[160];
     snprintf(msg, sizeof(msg), "buy_car: target=%d", target_count);
     farm_log(fe, msg);

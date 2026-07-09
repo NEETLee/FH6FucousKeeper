@@ -262,11 +262,16 @@ HWND Gui_Create(const GuiContext *ctx)
     screen_x = (GetSystemMetrics(SM_CXSCREEN) - win_w) / 2;
     screen_y = (GetSystemMetrics(SM_CYSCREEN) - win_h) / 2;
 
-    /* Create main window */
+    /* Create main window (debug builds get a visible [DEBUG] title mark) */
+#ifdef FK_DEBUG
+    const WCHAR *win_title = L"FH6 FocusKeeper  [DEBUG]";
+#else
+    const WCHAR *win_title = L"FH6 FocusKeeper";
+#endif
     s_gui.hwnd_main = CreateWindowExW(
         WS_EX_APPWINDOW,
         L"FH6FocusKeeperMain",
-        L"FH6 FocusKeeper",
+        win_title,
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
         screen_x, screen_y, win_w, win_h,
         NULL, NULL, ctx->hInstance, NULL
@@ -284,6 +289,9 @@ HWND Gui_Create(const GuiContext *ctx)
 
     LayoutPages();
     SwitchPage(0);
+
+    /* Apply i18n labels + debug title suffix (CreateWindow used a fallback). */
+    Gui_RefreshLanguage(FALSE, FALSE);
 
     /* Set initial status text */
     Gui_UpdateStatus(FALSE, NULL, NULL, NULL, 0);

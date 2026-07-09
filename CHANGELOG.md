@@ -5,6 +5,11 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.3.4] - 2026-07-10
+
+### 修复
+- **修复刷抽奖循环第二轮起买车被跳过**：修复了一个偶现 bug——点数和 CR 都够时，买车流程会完整导航并选中目标车，却不执行购买就直接进入抽奖。根因是买车计数器在流水线多轮循环间从不重置，上一轮买过 N 辆后，下一轮目标 ≤ N 时购买循环一次都不进。现在每次买车都会从 0 重新计数，并正确累计本轮实际购买数。
+
 ## [1.3.3] - 2026-07-01
 
 ### 修复
@@ -87,6 +92,7 @@
 - 作者签名、GitHub 仓库链接、窗口模式使用提示。
 - 基于 GitHub Actions 的自动构建与发布流水线。
 
+[1.3.4]: https://github.com/NEETLee/FH6FucousKeeper/compare/v1.3.3...v1.3.4
 [1.3.3]: https://github.com/NEETLee/FH6FucousKeeper/compare/v1.3.2...v1.3.3
 [1.3.2]: https://github.com/NEETLee/FH6FucousKeeper/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/NEETLee/FH6FucousKeeper/compare/v1.3.0...v1.3.1
