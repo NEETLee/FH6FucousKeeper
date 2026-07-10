@@ -122,6 +122,20 @@ void GameInput_Press(GameInput *gi, DWORD vk, int delay_ms) {
     gi->key_state[vk & 0xFF] = 0;
 }
 
+void GameInput_TypeChar(GameInput *gi, DWORD vk, int delay_ms) {
+    if (!gi || !gi->ready) return;
+    if (delay_ms <= 0) delay_ms = 80;
+    LPARAM lp = MakeKeyLParam(vk, FALSE, gi->key_state[vk & 0xFF]);
+    PostMessageW(gi->hwnd, WM_KEYDOWN, vk, lp);
+    /* Text fields consume WM_CHAR; VK for '0'-'9'/'A'-'Z' equals the char code. */
+    if ((vk >= '0' && vk <= '9') || (vk >= 'A' && vk <= 'Z'))
+        PostMessageW(gi->hwnd, WM_CHAR, vk, lp);
+    gi->key_state[vk & 0xFF] = 1;
+    Sleep(delay_ms);
+    PostMessageW(gi->hwnd, WM_KEYUP, vk, MakeKeyLParam(vk, TRUE, FALSE));
+    gi->key_state[vk & 0xFF] = 0;
+}
+
 void GameInput_KeyDown(GameInput *gi, DWORD vk) {
     if (!gi || !gi->ready) return;
     BOOL repeat = gi->key_state[vk & 0xFF];

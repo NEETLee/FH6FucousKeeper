@@ -22,6 +22,17 @@ typedef void (*FarmLogFunc)(const char *msg, void *ctx);
 /* Frame grab callback - must call TM_SetFrame internally */
 typedef BOOL (*FarmGrabFunc)(void *ctx);
 
+/* Fired once per completed unit (1 car bought, 1 spin, 1 removal, 1 race lap).
+ * Used by the pipeline to refresh cumulative totals without waiting for the
+ * whole step to finish. */
+typedef enum {
+    FARM_UNIT_BUY = 1,
+    FARM_UNIT_SPIN,
+    FARM_UNIT_REMOVE,
+    FARM_UNIT_RACE
+} FarmUnitKind;
+typedef void (*FarmUnitDoneFunc)(FarmUnitKind unit, void *ctx);
+
 /* Create/destroy the farm engine */
 FarmEngine* Farm_Create(void);
 void        Farm_Destroy(FarmEngine *fe);
@@ -35,6 +46,8 @@ typedef struct {
     void        *log_ctx;
     FarmGrabFunc grab_func;
     void        *grab_ctx;
+    FarmUnitDoneFunc on_unit_done; /* optional; may be NULL */
+    void        *on_unit_done_ctx;
     /* Per-car mastery skill-tree path (VK codes). Empty -> built-in 22B path. */
     DWORD        skill_dirs[16];
     int          skill_count;

@@ -1,176 +1,215 @@
 # FH6 FocusKeeper
 
-**Forza Horizon 6 防暂停 + 自动赛事工具** — 防止游戏在失去焦点时暂停，并支持后台自动刷技术点。
+**Forza Horizon 6 防暂停 + 全自动刷图工具** — 游戏切到后台也不暂停，并可在后台自动刷技术点、买车、超级抽奖、清车库。
 
 [🌐 English](docs/README_EN.md)
 
 ## 功能
 
-- **防暂停**：通过 DLL Hook 拦截窗口焦点消息，游戏切到后台也不会暂停
-- **自动赛事**：可配置的自动比赛循环，后台刷技术点/经验（PostMessage 注入，不影响正常使用电脑）
-- **配置文件驱动**：INI 格式定义比赛流程，支持自定义步骤/按键/时序
-- **静音控制**：独立的静音按钮，可随时静音/恢复游戏音频
-- **通用方案**：Steam 和 Microsoft Store 版本均适用
-- **多语言**：支持简体中文 / 繁体中文 / English，默认跟随系统语言
-- **高 DPI 支持**：自动适配 2K/4K 等高分辨率显示器
-- **系统托盘**：支持最小化到托盘，后台静默运行
-- **全局热键**：Ctrl+F12 快速开关防暂停
-- **阻止休眠**：防暂停期间自动阻止系统进入休眠状态
+- **防暂停**：DLL Hook 拦截失焦消息，游戏切到后台也不会暂停
+- **全自动刷图**：一键循环「跑图刷 SP → 读余额 → 买车 → 超级抽奖 → 清车库」，全程后台运行，不抢鼠标键盘
+- **真正的后台**：对游戏窗口截屏 + PostMessage 注入，窗口不必置顶，可同时干别的事
+- **双配置体系**：赛事 profile（分享码 / 跑图用车）与车辆 profile（买车 / 抽奖用车）分开配置
+- **静音控制**：独立静音按钮，随时静音 / 恢复游戏音频
+- **通用方案**：Steam 与 Microsoft Store 版均适用
+- **多语言**：简体中文 / 繁体中文 / English，默认跟随系统语言
+- **高 DPI**：自动适配 2K / 4K
+- **系统托盘**：可最小化到托盘后台运行
+- **热键**：Ctrl+F12 开关防暂停；流水线 F8 停止 / F9 暂停
+- **阻止休眠**：防暂停期间可阻止系统休眠
 - **版本检测**：自动检查 GitHub 新版本并提示
 
 ## 前置条件
 
-> ⚠️ **请将游戏切换到窗口模式运行**（快捷键 Alt+Enter）。本工具仅在窗口模式下有效。
-
-## 测试环境
+> ⚠️ **请将游戏切换到窗口模式**（Alt+Enter）。本工具仅在窗口模式下有效。
 
 - Windows 10 / Windows 11
-- Forza Horizon 6 Steam 版
-- Forza Horizon 6 Microsoft Store 版
-
-## 原理
-
-### 防暂停
-
-通过 `SetWindowsHookEx(WH_CALLWNDPROC)` 安装全局消息钩子，将 `hook.dll` 注入到游戏进程，然后对游戏窗口进行子类化（Subclass）。子类化后的窗口过程会拦截以下消息：
-
-| 消息 | 作用 |
-|------|------|
-| `WM_ACTIVATEAPP` | 应用程序激活/失活通知 |
-| `WM_KILLFOCUS` | 键盘焦点丢失通知 |
-| `WM_NCACTIVATE` | 非客户区激活状态变化 |
-| `WM_ACTIVATE` | 窗口激活状态变化 |
-
-当游戏失去焦点时，这些消息被静默丢弃，游戏"认为"自己始终是前台窗口。
-
-### 自动赛事
-
-通过 `PostMessage` 向游戏窗口发送 `WM_KEYDOWN`/`WM_KEYUP` 消息模拟按键。完全后台运行，不抢占前台焦点，不影响正常使用电脑。
-
-比赛流程由 INI 配置文件驱动，支持以下模式：
-- **wait**：等待指定时间
-- **hold**：按住某键指定时间（周期性重发 WM_KEYDOWN）
-- **tap**：定时点按某键（按下→松开→间隔→重复）
-- **sequence**：多键序列操作
-
-## 编译
-
-### 环境要求
-
-- [w64devkit](https://github.com/skeeto/w64devkit)（便携 MinGW-w64 工具链，无需安装）
-
-### 构建步骤
-
-```bash
-# 打开 w64devkit 终端，切到项目目录
-cd /path/to/FH6FocusKeeper
-
-# 编译
-make
-
-# 输出文件
-# build/FocusKeeper.exe       - 主程序
-# build/hook.dll              - 钩子 DLL（需与 exe 放在同一目录）
-# build/profiles/170516901.ini - 默认赛事配置
-```
-
-### 其他命令
-
-```bash
-make clean    # 清理构建产物
-make rebuild  # 重新构建
-make debug    # 调试构建（含符号信息）
-```
+- Forza Horizon 6（Steam 或 Microsoft Store）
+- **以管理员身份运行**（注入游戏进程需要）
+- 完整发布包：`FocusKeeper.exe`、`hook.dll`、`assets/templates/`、`profiles/`（含 `cars/`）  
+  不要只拷贝一个 exe，缺模板或配置会无法刷图
 
 ## 使用方法
 
-### 基本使用
+### 1. 第一次启动
 
-1. 将 `FocusKeeper.exe`、`hook.dll` 和 `profiles/` 文件夹放在同一目录
-2. **以管理员权限运行** `FocusKeeper.exe`（需要管理员权限才能注入到游戏进程）
-3. **将游戏切换到窗口模式**（Alt+Enter）
-4. 启动游戏后，点击「查找游戏窗口」
-5. 点击「开启防暂停」或使用快捷键 Ctrl+F12
+1. 解压发布包，保持目录结构完整
+2. **右键 → 以管理员身份运行** `FocusKeeper.exe`
+3. 启动游戏，并切到**窗口模式**（Alt+Enter）
+4. 打开「**状态**」页 → 点「**查找游戏窗口**」
+5. 点「**开启防暂停**」（或按 **Ctrl+F12**）
 
-### 自动赛事
+此时游戏失焦也不会暂停。需要静音时，同一页点「静音游戏」即可。
 
-1. 切换到「自动赛事」标签页
-2. 选择赛事配置文件（或编辑 `profiles/` 目录下的 INI 文件）
-3. 点击「开始自动赛事」（会自动启用防暂停）
-4. 程序会按配置循环执行比赛流程
+> 刷图流水线**不会**自动开防暂停。挂机前请先手动开启，否则切到别的窗口游戏可能暂停。
 
-### 配置文件格式
+### 2. 全自动刷图（重点）
 
-```ini
-; 注释行（分号开头）会显示在程序的配置说明区域
-[Profile]
-Name=170516901
-StepCount=4
+打开「**自动赛事**」标签页。这里是刷车流水线主界面。
 
-[Step0]
-Name=选择重赛
-Mode=tap
-Duration=1000
-Key=88
-HoldMs=80
-Interval=2000
+#### 一轮循环在做什么
 
-[Step1]
-Name=确认1
-Mode=tap
-Duration=10000
-Key=13
-HoldMs=80
-Interval=6000
+```
+赛事（刷 SP）→ 读取 CR/SP → 买车 → 超级抽奖 → 删车 → 下一轮
 ```
 
-常用键码：W=87 A=65 S=83 D=68 X=88 E=69 Enter=13 Esc=27 Space=32
+- **赛事**：按赛事配置里的蓝图分享码进图，跑圈刷技术点
+- **买车 / 抽奖 / 删车**：按车辆配置批量买消耗品车、开超级抽奖、再清掉
+
+跑图用车和刷抽奖用车是两套配置，互不替代。
+
+#### 选好两套配置
+
+| 下拉框 | 对应文件 | 决定什么 |
+|--------|----------|----------|
+| **车辆** | `profiles/cars/<车名>/` | 买哪辆、抽哪辆、删哪辆；单车 CR/SP 成本；技能树路径 |
+| **赛事** | `profiles/*.ini` | EventLab 分享码；每圈 SP；跑图选车用的车名 + PI |
+
+自带示例：
+
+- 车辆：`profiles/cars/22B/`（Subaru 22B STI）
+- 赛事：`profiles/341075827.ini`（分享码 `341075827`）
+
+#### 调参数
+
+| 选项 | 含义 |
+|------|------|
+| **循环步骤** | 勾选本轮要跑的步骤：赛事 / 买车 / 抽奖 / 删车（可只跑其中几步） |
+| **目标 SP** | 赛事步骤要刷到的技术点目标（例如 999）；配合赛事 ini 里的 `SPPerLap` 闭环补跑 |
+| **循环轮数** | 完整大循环跑几轮（默认 1） |
+| **自动算量** | 勾选后按 `min(CR÷单车CR, SP÷单车SP)` 自动算买几辆；取消则用「手动数量」 |
+| **手动数量** | 关闭自动算量时，买车 / 抽奖 / 删车共用的数量 |
+
+点「**刷新 CR/SP**」可先读一次余额，看「可买」数量是否合理。
+
+#### 开始刷
+
+1. 游戏回到**主菜单**附近（流水线会自己导航，但别停在加载/过场里）
+2. 建议游戏内开启**自动转向辅助**（跑图更稳）
+3. 点「**开始完整循环**」
+4. 需要中断：点「**停止 (F8)**」，或按 **F8**；**F9** 可暂停 / 继续
+
+也可以用「**单步执行**」只跑赛事、只买车、只抽奖或只删车，方便调试。
+
+运行时游戏窗口可能出现黄色截屏边框，属正常现象；流水线结束后会自动关掉。
+
+### 3. 配置文件怎么写
+
+#### 赛事 profile（`profiles/某某.ini`）
+
+流水线真正用到的字段：
+
+```ini
+[Profile]
+Name=341075827
+SPPerLap=50
+ShareCode=341075827
+; 跑图选车：OCR 按「车名 + PI」匹配，与车辆 profile 无关
+CarName=Subaru 22B STI
+CarPI=834
+```
+
+| 字段 | 说明 |
+|------|------|
+| `ShareCode` | **必填**。EventLab 蓝图分享码；没有则跳过赛事步骤 |
+| `SPPerLap` | 每圈大约拿多少技术点；与界面「目标 SP」一起做闭环补跑 |
+| `CarName` / `CarPI` | 进赛事选车界面时 OCR 识别用；不写则不走 OCR，可能沿用当前车 |
+
+> 文件里若还有 `[Step0]`、`Mode=hold` 等旧字段，那是遗留的「定时按键脚本」模式（热键 Ctrl+F11），**不是**现在的视觉刷图主路径。日常挂机只需维护上面几个字段。
+
+#### 车辆 profile（`profiles/cars/<id>/car.ini`）
+
+```ini
+[Car]
+Name=Subaru 22B STI
+CostCR=81700
+CostSP=30
+
+[SkillTree]
+Dirs=RIGHT,UP,UP,UP,LEFT
+```
+
+| 字段 | 说明 |
+|------|------|
+| `CostCR` / `CostSP` | 单车花费；自动算量用 |
+| `Dirs` | 超级抽奖时技能树点击方向 |
+
+同目录可放该车专属模板图（优先于共享模板），例如：
+
+`consumablecar.png`、`CCbrand.png`、`removecarobject.png`、`newCC.png`
+
+换一辆刷图车：复制 `cars/22B/` 改名，改 `car.ini` 和专属图片即可。
+
+### 4. 热键
+
+| 热键 | 作用 |
+|------|------|
+| **Ctrl+F12** | 开关防暂停 |
+| **F8** | 停止刷图流水线 |
+| **F9** | 暂停 / 继续流水线 |
+| **Ctrl+F11** | 遗留：开关旧版定时按键自动赛事（一般不用） |
+
+### 5. 常见问题
+
+| 现象 | 处理 |
+|------|------|
+| 提示找不到模板 | 从发布包根目录启动，确认有 `assets/templates/` |
+| 找不到游戏窗口 | 先窗口模式，再在「状态」页点「查找游戏窗口」 |
+| 切走窗口游戏就暂停 | 先开防暂停（Ctrl+F12） |
+| 「可买」为 0 | CR 或 SP 不够买一辆；先跑赛事刷 SP，或调低目标 / 换更便宜的车 |
+| 赛事步骤直接跳过 | 赛事 ini 缺少 `ShareCode` |
+| 买了车却不抽 / 抽不到 | 看车辆 profile 是否选对；抽奖依赖该车的模板与技能树路径 |
+| 黄色边框一直在 | 流水线还在跑或异常退出；点停止后再试，或重启工具 |
+
+## 原理（简要）
+
+### 防暂停
+
+`SetWindowsHookEx(WH_CALLWNDPROC)` 注入 `hook.dll`，子类化游戏窗口，丢弃 `WM_ACTIVATEAPP` / `WM_KILLFOCUS` / `WM_NCACTIVATE` / `WM_ACTIVATE` 等失焦消息。
+
+### 自动刷图
+
+对游戏窗口做屏幕捕获（WGC）+ 模板匹配 / OCR 识别界面，再用 `PostMessage` 向游戏窗口发键鼠消息。不抢前台焦点。分享码：检测到 Xbox/Store 的 UIA 文本框则用 UI Automation 填写，否则按 Steam 方式向游戏窗口注入字符。
+
+## 编译
+
+### 环境
+
+- [w64devkit](https://github.com/skeeto/w64devkit) 或 MSYS2 MinGW64（需 OpenCV 等依赖，见 `Makefile`）
+
+### 命令
+
+```bash
+# 开发 / 调试版（含刷图流水线 + 调试通道）
+make farm
+# 输出：build/FocusKeeper.exe
+
+# 正式发布包（无调试代码）
+make farm-release
+# 输出：dist/ 完整可运行目录
+
+make clean
+make rebuild
+```
+
+> 普通 `make` **不含**刷图流水线。日常使用请下载 Release，或自行 `make farm-release`。
 
 ## 项目结构
 
 ```
 FH6FocusKeeper/
-├── src/
-│   ├── hook/
-│   │   ├── hook.h            # Hook DLL 接口
-│   │   ├── hook.c            # 子类化窗口过程 + 消息拦截
-│   │   └── hook.def          # 共享段定义
-│   └── loader/
-│       ├── main.c            # 入口 + 模块协调 (Mediator)
-│       ├── gui.c/h           # Win32 标签页 GUI（DPI 感知）
-│       ├── tray.c/h          # 系统托盘图标
-│       ├── hook_manager.c/h  # DLL 加载管理 (Facade)
-│       ├── window_finder.c/h # 窗口查找 (Strategy)
-│       ├── audio_control.c/h # WASAPI 进程静音
-│       ├── i18n.c/h          # 国际化字符串表（简/繁/英）
-│       ├── logger.c/h        # 日志系统 (Observer)
-│       ├── settings.c/h      # INI 配置管理
-│       ├── auto_race.c/h     # 自动赛事引擎
-│       ├── race_profile.c/h  # 赛事配置加载（编码自适应）
-│       ├── race_controller.c/h # 赛事控制器
-│       ├── step_executor.c/h # 步骤执行策略 (Strategy)
-│       ├── input_hook_backend.c/h # 按键注入 (PostMessage)
-│       └── version_check.c/h # GitHub 版本检测
-├── data/
-│   └── profiles/
-│       └── 170516901.ini     # 默认赛事配置模板
-├── res/
-│   ├── resource.h            # 控件 ID 定义
-│   ├── app.rc                # 资源脚本
-│   ├── app.manifest          # 应用清单（PerMonitorV2 DPI）
-│   └── app.ico               # 应用图标
+├── src/hook/                 # 防暂停 DLL
+├── src/loader/               # 主程序、GUI、刷图流水线、OCR、截屏…
+├── assets/templates/         # 共享界面模板图
+├── data/profiles/            # 赛事 ini + cars/<车>/ 车辆配置
+├── res/                      # 图标、清单、资源
 ├── Makefile
 └── README.md
 ```
 
-## 设计模式
+## 致谢
 
-- **Strategy**：WindowFinder 按不同策略查找游戏窗口；StepExecutor 按不同模式执行步骤
-- **Observer**：Logger 多回调通知，HookManager/AutoRace 状态回调
-- **Facade**：HookManager 封装 DLL 加载和 Hook 安装细节；InputBackend 封装按键注入
-- **Mediator**：main.c 协调各模块通信
-- **Repository**：RaceProfile 管理配置文件的加载/枚举
-- **Chain of Responsibility**：SubclassProc 消息过滤链
+本项目的自动刷图流程设计与界面模板图片，借鉴自开源项目 [**fh6auto（YOUSTHEONE/FH6Auto）**](https://github.com/YOUSTHEONE/FH6Auto)。其「循环跑图 / 批量买车 / 超级抽奖 / 大循环挂机」的模块化思路与蓝图分享码进图、目标车辆匹配等流程，给了本项目直接启发。在此向 fh6auto 作者致以诚挚谢意。
 
 ## 作者
 

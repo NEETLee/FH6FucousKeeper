@@ -20,8 +20,8 @@
 /* ─── Constants ───────────────────────────────────────────────────── */
 #define BASE_WIDTH      520
 #define BASE_HEIGHT     420
-#define TAB_MARGIN      8
-#define CTRL_MARGIN     12
+#define TAB_MARGIN      4
+#define CTRL_MARGIN     6
 
 /* ─── DPI Scaling ─────────────────────────────────────────────────── */
 static UINT s_dpi = 96;
@@ -67,6 +67,9 @@ static struct {
     HWND        hwnd_btn_race_stop;
     HWND        hwnd_lbl_race_info;
     HWND        hwnd_edit_profile_desc;
+
+    /* Modeless profile-notes window (at most one) */
+    HWND        hwnd_notes;
 
     /* Footer font and brush */
     HFONT       hFontFooter;
@@ -589,6 +592,8 @@ void Gui_RefreshLanguage(BOOL hook_active, BOOL muted)
             { IDC_PIPE_BTN_BUY,    STR_PIPE_STEP_BUY },
             { IDC_PIPE_BTN_SPIN,   STR_PIPE_STEP_SPIN },
             { IDC_PIPE_BTN_REMOVE, STR_PIPE_STEP_REMOVE },
+            { IDC_PIPE_BTN_CAR_NOTES,  STR_PIPE_BTN_NOTES },
+            { IDC_PIPE_BTN_RACE_NOTES, STR_PIPE_BTN_NOTES },
         };
         for (size_t i = 0; i < sizeof(items)/sizeof(items[0]); i++) {
             HWND h = GetDlgItem(pf, items[i].id);
@@ -640,48 +645,38 @@ static void CreateTabControl(HWND parent)
 
 static void CreateStatusPage(HWND parent)
 {
-    int pw = S(484);
+    int m = S(CTRL_MARGIN);
+    int pw = S(488);
     HWND page = CreateWindowExW(0, PANEL_CLASS, L"",
         WS_CHILD | WS_CLIPCHILDREN,
         0, 0, 0, 0, parent, NULL, s_gui.hInstance, NULL);
     s_gui.pages[0] = page;
 
-    /*
-     * Layout: status banner (centered) → info columns → buttons → tip → signature
-     * Page height ~330 base px.
-     */
-
-    /* Status indicator - vertically and horizontally centered in top banner area (0..80) */
+    /* Positions are placeholders; LayoutPages sizes to the real page rect. */
     s_gui.hwnd_status_text = CreateCtrl(L"STATIC", I18n_Get(STR_STATUS_IDLE),
         SS_CENTER | SS_CENTERIMAGE, 0, 0, pw, S(80), page, IDC_STATUS_TEXT);
     if (s_gui.hwnd_status_text && s_gui.hFontStatus)
         SendMessage(s_gui.hwnd_status_text, WM_SETFONT, (WPARAM)s_gui.hFontStatus, TRUE);
 
-    /* Two-column: game info (left) | stats (right) */
-    int col_left = S(24);
-    int col_right = S(250);
     s_gui.hwnd_game_info = CreateCtrl(L"STATIC", L"",
-        SS_LEFT, col_left, S(86), S(215), S(72), page, IDC_GAME_TITLE);
+        SS_LEFT, m, S(86), S(230), S(72), page, IDC_GAME_TITLE);
 
     s_gui.hwnd_stats = CreateCtrl(L"STATIC", L"",
-        SS_LEFT, col_right, S(86), S(225), S(110), page, IDC_STAT_KILLFOCUS);
+        SS_LEFT, m + S(240), S(86), S(230), S(110), page, IDC_STAT_KILLFOCUS);
 
-    /* Buttons row - evenly distributed */
     int btn_y = S(208);
     s_gui.hwnd_btn_find = CreateCtrl(L"BUTTON", I18n_Get(STR_BTN_FIND),
-        BS_PUSHBUTTON, S(11), btn_y, S(145), S(32), page, IDC_BTN_FIND);
+        BS_PUSHBUTTON, m, btn_y, S(150), S(32), page, IDC_BTN_FIND);
 
     s_gui.hwnd_btn_enable = CreateCtrl(L"BUTTON", I18n_Get(STR_BTN_ENABLE),
-        BS_PUSHBUTTON, S(167), btn_y, S(155), S(32), page, IDC_BTN_ENABLE);
+        BS_PUSHBUTTON, m + S(158), btn_y, S(160), S(32), page, IDC_BTN_ENABLE);
 
     s_gui.hwnd_btn_disable = CreateCtrl(L"BUTTON", I18n_Get(STR_BTN_MUTE_ENABLE),
-        BS_PUSHBUTTON, S(333), btn_y, S(140), S(32), page, IDC_BTN_MUTE_TOGGLE);
+        BS_PUSHBUTTON, m + S(326), btn_y, S(150), S(32), page, IDC_BTN_MUTE_TOGGLE);
 
-    /* Tip - prominent, below buttons */
     CreateCtrl(L"STATIC", I18n_Get(STR_TIP_WINDOWED),
         SS_CENTER | SS_NOPREFIX, 0, S(252), pw, S(20), page, IDC_LBL_TIP);
 
-    /* Signature - small italic gray, flush to page bottom */
     HWND hAbout = CreateCtrl(L"STATIC", I18n_Get(STR_ABOUT_BRIEF),
         SS_CENTER | SS_NOPREFIX, 0, S(318), pw, S(14), page, IDC_LBL_ABOUT_BRIEF);
     if (hAbout && s_gui.hFontFooter)
@@ -699,9 +694,10 @@ static void CreateWindowListPage(HWND parent)
         0, 0, 0, 0, parent, NULL, s_gui.hInstance, NULL);
     s_gui.pages[1] = page;
 
+    /* Size filled by LayoutPages. */
     s_gui.hwnd_listview = CreateCtrlEx(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"",
         LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS,
-        m, S(8), S(460), S(282), page, IDC_WINDOW_LIST);
+        m, m, S(488), S(260), page, IDC_WINDOW_LIST);
 
     ListView_SetExtendedListViewStyle(s_gui.hwnd_listview,
         LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
@@ -724,10 +720,10 @@ static void CreateWindowListPage(HWND parent)
     ListView_InsertColumn(s_gui.hwnd_listview, 4, &lvc);
 
     s_gui.hwnd_btn_refresh = CreateCtrl(L"BUTTON", I18n_Get(STR_BTN_REFRESH),
-        BS_PUSHBUTTON, m, S(298), S(100), S(28), page, IDC_BTN_REFRESH);
+        BS_PUSHBUTTON, m, S(280), S(100), S(28), page, IDC_BTN_REFRESH);
 
     s_gui.hwnd_btn_select = CreateCtrl(L"BUTTON", I18n_Get(STR_BTN_SELECT),
-        BS_PUSHBUTTON, m + S(115), S(298), S(140), S(28), page, IDC_BTN_SELECT);
+        BS_PUSHBUTTON, m + S(115), S(280), S(140), S(28), page, IDC_BTN_SELECT);
 }
 
 /* ─── Log Page ────────────────────────────────────────────────────── */
@@ -740,12 +736,13 @@ static void CreateLogPage(HWND parent)
         0, 0, 0, 0, parent, NULL, s_gui.hInstance, NULL);
     s_gui.pages[2] = page;
 
+    /* Size filled by LayoutPages. */
     s_gui.hwnd_log_edit = CreateCtrlEx(WS_EX_CLIENTEDGE, L"EDIT", L"",
         ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL,
-        m, S(8), S(460), S(284), page, IDC_LOG_EDIT);
+        m, m, S(488), S(260), page, IDC_LOG_EDIT);
 
     s_gui.hwnd_btn_clear = CreateCtrl(L"BUTTON", I18n_Get(STR_BTN_CLEAR_LOG),
-        BS_PUSHBUTTON, m, S(298), S(100), S(28), page, IDC_BTN_CLEAR_LOG);
+        BS_PUSHBUTTON, m, S(280), S(100), S(28), page, IDC_BTN_CLEAR_LOG);
 }
 
 /* ─── Settings Page ───────────────────────────────────────────────── */
@@ -753,7 +750,7 @@ static void CreateLogPage(HWND parent)
 static void CreateSettingsPage(HWND parent)
 {
     int m = S(CTRL_MARGIN);
-    int y = S(10);
+    int y = S(4);
     HWND page = CreateWindowExW(0, PANEL_CLASS, L"",
         WS_CHILD | WS_CLIPCHILDREN,
         0, 0, 0, 0, parent, NULL, s_gui.hInstance, NULL);
@@ -780,22 +777,22 @@ static void CreateSettingsPage(HWND parent)
     y += S(36);
     CreateCtrl(L"STATIC", I18n_Get(STR_SETTINGS_LANGUAGE), SS_LEFT, m, y, S(80), S(20), page, IDC_LBL_LANGUAGE);
     CreateCtrl(L"BUTTON", I18n_Get(STR_SETTINGS_LANG_AUTO),
-        BS_AUTORADIOBUTTON | WS_GROUP, S(95), y, S(90), S(20), page, IDC_RADIO_LANG_AUTO);
+        BS_AUTORADIOBUTTON | WS_GROUP, m + S(88), y, S(90), S(20), page, IDC_RADIO_LANG_AUTO);
     CreateCtrl(L"BUTTON", I18n_Get(STR_SETTINGS_LANG_ZH),
-        BS_AUTORADIOBUTTON, S(190), y, S(80), S(20), page, IDC_RADIO_LANG_ZH);
+        BS_AUTORADIOBUTTON, m + S(184), y, S(80), S(20), page, IDC_RADIO_LANG_ZH);
     CreateCtrl(L"BUTTON", I18n_Get(STR_SETTINGS_LANG_ZH_TW),
-        BS_AUTORADIOBUTTON, S(275), y, S(80), S(20), page, IDC_RADIO_LANG_ZH_TW);
+        BS_AUTORADIOBUTTON, m + S(270), y, S(80), S(20), page, IDC_RADIO_LANG_ZH_TW);
     CreateCtrl(L"BUTTON", I18n_Get(STR_SETTINGS_LANG_EN),
-        BS_AUTORADIOBUTTON, S(360), y, S(80), S(20), page, IDC_RADIO_LANG_EN);
+        BS_AUTORADIOBUTTON, m + S(356), y, S(80), S(20), page, IDC_RADIO_LANG_EN);
 
     y += S(36);
     s_gui.hwnd_btn_save = CreateCtrl(L"BUTTON", I18n_Get(STR_BTN_SAVE),
         BS_PUSHBUTTON, m, y, S(110), S(28), page, IDC_BTN_SAVE);
 
-    /* About / credits - footer style at bottom */
+    /* Footer pinned to page bottom in LayoutPages. */
     {
         HWND hRepo = CreateCtrl(L"SysLink", I18n_Get(STR_ABOUT_REPO),
-            0, m, S(318), S(420), S(16), page, IDC_LBL_ABOUT_REPO);
+            0, m, S(300), S(420), S(16), page, IDC_LBL_ABOUT_REPO);
         if (hRepo && s_gui.hFontFooter)
             SendMessage(hRepo, WM_SETFONT, (WPARAM)s_gui.hFontFooter, TRUE);
     }
@@ -842,33 +839,41 @@ static void SetChecked(HWND page, int id, BOOL checked) {
 static void CreateAutoRacePage(HWND parent)
 {
     int m = S(CTRL_MARGIN);
-    int pw = S(460);                  /* content width (matches Log page) */
+    int pw = S(488);                  /* content width (matches Log page) */
     int lblw = S(80);                 /* width for the row labels (steps/single) */
-    int y = S(10);
+    int y = S(4);
     HWND page = CreateWindowExW(0, PANEL_CLASS, L"",
         WS_CHILD | WS_CLIPCHILDREN,
         0, 0, 0, 0, parent, NULL, s_gui.hInstance, NULL);
     s_gui.pages[4] = page;
     s_gui.hwnd_edit_profile_desc = NULL;
 
-    /* ── Foundation: car + race profile pickers on one compact row ── */
+    /* ── Foundation: car + race profile pickers, each with a Notes button ── */
     {
-        int carlw = S(28), racelw = S(36), gap = S(10);
-        int combo_total = pw - carlw - racelw - gap;   /* shared by 2 combos */
+        int carlw = S(28), racelw = S(36), gap = S(8), notew = S(48), pad = S(4);
+        int combo_total = pw - carlw - racelw - gap - notew * 2 - pad * 2;
+        if (combo_total < S(120)) combo_total = S(120);
         int cw1 = combo_total / 2;
+        int cw2 = combo_total - cw1;
         int cx = m;
         CreateCtrl(L"STATIC", I18n_Get(STR_PIPE_CAR), SS_LEFT,
             cx, y + S(4), carlw, S(18), page, 0);
         cx += carlw;
         CreateCtrlEx(0, L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL,
             cx, y, cw1, S(220), page, IDC_PIPE_COMBO_CAR);
-        cx += cw1 + gap;
+        cx += cw1 + pad;
+        CreateCtrl(L"BUTTON", I18n_Get(STR_PIPE_BTN_NOTES), BS_PUSHBUTTON,
+            cx, y, notew, S(24), page, IDC_PIPE_BTN_CAR_NOTES);
+        cx += notew + gap;
         CreateCtrl(L"STATIC", I18n_Get(STR_PIPE_STEP_RACE), SS_LEFT,
             cx, y + S(4), racelw, S(18), page, 0);
         cx += racelw;
         s_gui.hwnd_combo_profile = CreateCtrlEx(0, L"COMBOBOX", L"",
             CBS_DROPDOWNLIST | WS_VSCROLL,
-            cx, y, m + pw - cx, S(220), page, IDC_COMBO_PROFILE);
+            cx, y, cw2, S(220), page, IDC_COMBO_PROFILE);
+        cx += cw2 + pad;
+        CreateCtrl(L"BUTTON", I18n_Get(STR_PIPE_BTN_NOTES), BS_PUSHBUTTON,
+            cx, y, notew, S(24), page, IDC_PIPE_BTN_RACE_NOTES);
     }
     y += S(34);
 
@@ -948,7 +953,7 @@ static void CreateAutoRacePage(HWND parent)
 
     /* ── Per-step pipeline log (append, fills remaining height) ── */
     {
-        int log_h = S(BASE_HEIGHT) - S(92) - y;
+        int log_h = S(BASE_HEIGHT) - S(72) - y;
         if (log_h < S(60)) log_h = S(60);
         HWND log = CreateCtrlEx(WS_EX_CLIENTEDGE, L"EDIT", L"",
             ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL,
@@ -963,6 +968,9 @@ static void CreateAutoRacePage(HWND parent)
 static void LayoutPages(void)
 {
     RECT rc;
+    int m = S(CTRL_MARGIN);
+    int btn_h = S(28);
+    int gap = S(6);
 
     if (!s_gui.hwnd_tab) return;
 
@@ -977,6 +985,147 @@ static void LayoutPages(void)
             SetWindowPos(s_gui.pages[i], NULL,
                 rc.left, rc.top,
                 rc.right - rc.left, rc.bottom - rc.top,
+                SWP_NOZORDER);
+        }
+    }
+
+    /* Status: center info columns; buttons / tip / footer span page. */
+    if (s_gui.pages[0] && s_gui.hwnd_status_text) {
+        RECT pr;
+        GetClientRect(s_gui.pages[0], &pr);
+        int pw = pr.right - pr.left;
+        int ph = pr.bottom - pr.top;
+        int banner_h = S(80);
+        int tip_h = S(20);
+        int about_h = S(14);
+        int btn_row_h = S(32);
+        int about_y = ph - m - about_h;
+        int tip_y = about_y - S(8) - tip_h;
+        int btn_y = tip_y - S(16) - btn_row_h;
+        int col_y = banner_h + S(6);
+        /* Center a fixed-width two-column block so short text doesn't hug the left. */
+        int block_w = S(400);
+        if (block_w > pw - 2 * m) block_w = pw - 2 * m;
+        int block_x = (pw - block_w) / 2;
+        int col_gap = S(16);
+        int col_w = (block_w - col_gap) / 2;
+        int avail = pw - 2 * m;
+        int bg = S(8);
+        int bw = (avail - 2 * bg) / 3;
+
+        SetWindowPos(s_gui.hwnd_status_text, NULL, 0, 0, pw, banner_h, SWP_NOZORDER);
+        if (s_gui.hwnd_game_info)
+            SetWindowPos(s_gui.hwnd_game_info, NULL, block_x, col_y, col_w, S(72), SWP_NOZORDER);
+        if (s_gui.hwnd_stats)
+            SetWindowPos(s_gui.hwnd_stats, NULL, block_x + col_w + col_gap, col_y, col_w, S(110), SWP_NOZORDER);
+        if (s_gui.hwnd_btn_find)
+            SetWindowPos(s_gui.hwnd_btn_find, NULL, m, btn_y, bw, btn_row_h, SWP_NOZORDER);
+        if (s_gui.hwnd_btn_enable)
+            SetWindowPos(s_gui.hwnd_btn_enable, NULL, m + bw + bg, btn_y, bw, btn_row_h, SWP_NOZORDER);
+        if (s_gui.hwnd_btn_disable)
+            SetWindowPos(s_gui.hwnd_btn_disable, NULL, m + 2 * (bw + bg), btn_y, bw, btn_row_h, SWP_NOZORDER);
+
+        HWND tip = GetDlgItem(s_gui.pages[0], IDC_LBL_TIP);
+        if (tip) SetWindowPos(tip, NULL, 0, tip_y, pw, tip_h, SWP_NOZORDER);
+        HWND about = GetDlgItem(s_gui.pages[0], IDC_LBL_ABOUT_BRIEF);
+        if (about) SetWindowPos(about, NULL, 0, about_y, pw, about_h, SWP_NOZORDER);
+    }
+
+    /* Window list: list fills, buttons on bottom edge. */
+    if (s_gui.pages[1] && s_gui.hwnd_listview) {
+        RECT pr;
+        GetClientRect(s_gui.pages[1], &pr);
+        int pw = pr.right - pr.left;
+        int ph = pr.bottom - pr.top;
+        int btn_y = ph - m - btn_h;
+        int list_h = btn_y - gap - m;
+        if (list_h < S(60)) list_h = S(60);
+        SetWindowPos(s_gui.hwnd_listview, NULL, m, m, pw - 2 * m, list_h, SWP_NOZORDER);
+        if (s_gui.hwnd_btn_refresh)
+            SetWindowPos(s_gui.hwnd_btn_refresh, NULL, m, btn_y, S(100), btn_h, SWP_NOZORDER);
+        if (s_gui.hwnd_btn_select)
+            SetWindowPos(s_gui.hwnd_btn_select, NULL, m + S(115), btn_y, S(140), btn_h, SWP_NOZORDER);
+    }
+
+    /* Log: edit fills, clear on bottom edge. */
+    if (s_gui.pages[2] && s_gui.hwnd_log_edit) {
+        RECT pr;
+        GetClientRect(s_gui.pages[2], &pr);
+        int pw = pr.right - pr.left;
+        int ph = pr.bottom - pr.top;
+        int btn_y = ph - m - btn_h;
+        int edit_h = btn_y - gap - m;
+        if (edit_h < S(60)) edit_h = S(60);
+        SetWindowPos(s_gui.hwnd_log_edit, NULL, m, m, pw - 2 * m, edit_h, SWP_NOZORDER);
+        if (s_gui.hwnd_btn_clear)
+            SetWindowPos(s_gui.hwnd_btn_clear, NULL, m, btn_y, S(100), btn_h, SWP_NOZORDER);
+    }
+
+    /* Settings: center the form block; pin about link to bottom. */
+    if (s_gui.pages[3]) {
+        RECT pr;
+        GetClientRect(s_gui.pages[3], &pr);
+        int pw = pr.right - pr.left;
+        int ph = pr.bottom - pr.top;
+        /* Language row needs ~440px; keep form centered as one block. */
+        int form_w = S(440);
+        if (form_w > pw - 2 * m) form_w = pw - 2 * m;
+        int x = (pw - form_w) / 2;
+        int y = S(4);
+        int row_h = S(20);
+        int chk_indent = S(10);
+        HWND h;
+
+        h = GetDlgItem(s_gui.pages[3], IDC_LBL_OPTIONS);
+        if (h) SetWindowPos(h, NULL, x, y, S(80), row_h, SWP_NOZORDER);
+        y += S(24);
+
+        if (s_gui.hwnd_chk_autofind)
+            SetWindowPos(s_gui.hwnd_chk_autofind, NULL, x + chk_indent, y, form_w - chk_indent, row_h, SWP_NOZORDER);
+        y += S(26);
+        if (s_gui.hwnd_chk_tray)
+            SetWindowPos(s_gui.hwnd_chk_tray, NULL, x + chk_indent, y, form_w - chk_indent, row_h, SWP_NOZORDER);
+        y += S(26);
+        if (s_gui.hwnd_chk_logfile)
+            SetWindowPos(s_gui.hwnd_chk_logfile, NULL, x + chk_indent, y, form_w - chk_indent, row_h, SWP_NOZORDER);
+        y += S(26);
+        if (s_gui.hwnd_chk_prevent_sleep)
+            SetWindowPos(s_gui.hwnd_chk_prevent_sleep, NULL, x + chk_indent, y, form_w - chk_indent, row_h, SWP_NOZORDER);
+        y += S(36);
+
+        h = GetDlgItem(s_gui.pages[3], IDC_LBL_LANGUAGE);
+        if (h) SetWindowPos(h, NULL, x, y, S(80), row_h, SWP_NOZORDER);
+        h = GetDlgItem(s_gui.pages[3], IDC_RADIO_LANG_AUTO);
+        if (h) SetWindowPos(h, NULL, x + S(88), y, S(90), row_h, SWP_NOZORDER);
+        h = GetDlgItem(s_gui.pages[3], IDC_RADIO_LANG_ZH);
+        if (h) SetWindowPos(h, NULL, x + S(184), y, S(80), row_h, SWP_NOZORDER);
+        h = GetDlgItem(s_gui.pages[3], IDC_RADIO_LANG_ZH_TW);
+        if (h) SetWindowPos(h, NULL, x + S(270), y, S(80), row_h, SWP_NOZORDER);
+        h = GetDlgItem(s_gui.pages[3], IDC_RADIO_LANG_EN);
+        if (h) SetWindowPos(h, NULL, x + S(356), y, S(80), row_h, SWP_NOZORDER);
+        y += S(36);
+
+        if (s_gui.hwnd_btn_save)
+            SetWindowPos(s_gui.hwnd_btn_save, NULL, x + (form_w - S(110)) / 2, y, S(110), S(28), SWP_NOZORDER);
+
+        HWND repo = GetDlgItem(s_gui.pages[3], IDC_LBL_ABOUT_REPO);
+        if (repo) {
+            SetWindowPos(repo, NULL, m, ph - m - S(16),
+                pw - 2 * m, S(16), SWP_NOZORDER);
+        }
+    }
+
+    /* Auto race: stretch pipeline log to remaining page area. */
+    if (s_gui.pages[4]) {
+        HWND log = GetDlgItem(s_gui.pages[4], IDC_PIPE_LOG);
+        if (log) {
+            RECT pr, lr;
+            GetClientRect(s_gui.pages[4], &pr);
+            GetWindowRect(log, &lr);
+            MapWindowPoints(HWND_DESKTOP, s_gui.pages[4], (POINT *)&lr, 2);
+            SetWindowPos(log, NULL, m, lr.top,
+                pr.right - pr.left - 2 * m,
+                pr.bottom - pr.top - lr.top - m,
                 SWP_NOZORDER);
         }
     }
@@ -1076,6 +1225,117 @@ void Gui_SetProfileDescription(const WCHAR *text)
 {
     if (!s_gui.hwnd_edit_profile_desc) return;
     SetWindowTextW(s_gui.hwnd_edit_profile_desc, text ? text : L"");
+}
+
+/* ─── On-demand profile notes dialog (modeless) ───────────────────── */
+
+#define NOTES_WND_CLASS L"FH6FocusKeeperNotesDlg"
+#define IDC_NOTES_EDIT  1001
+
+static void Notes_LayoutChildren(HWND hwnd)
+{
+    RECT rc;
+    GetClientRect(hwnd, &rc);
+    int m = S(12), btn_h = S(30), btn_w = S(96);
+    HWND edit = GetDlgItem(hwnd, IDC_NOTES_EDIT);
+    HWND ok = GetDlgItem(hwnd, IDOK);
+    int edit_h = rc.bottom - m * 3 - btn_h;
+    if (edit_h < S(80)) edit_h = S(80);
+    if (edit)
+        SetWindowPos(edit, NULL, m, m, rc.right - m * 2, edit_h, SWP_NOZORDER);
+    if (ok)
+        SetWindowPos(ok, NULL, (rc.right - btn_w) / 2, rc.bottom - m - btn_h,
+            btn_w, btn_h, SWP_NOZORDER);
+}
+
+static LRESULT CALLBACK NotesWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    switch (msg) {
+    case WM_CREATE: {
+        CREATESTRUCTW *cs = (CREATESTRUCTW *)lParam;
+        const WCHAR *body = cs->lpCreateParams ? (const WCHAR *)cs->lpCreateParams : L"";
+        HWND edit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", body,
+            WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL |
+            ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | ES_AUTOHSCROLL,
+            0, 0, 0, 0,
+            hwnd, (HMENU)(INT_PTR)IDC_NOTES_EDIT, cs->hInstance, NULL);
+        HWND ok = CreateWindowExW(0, L"BUTTON", I18n_Get(STR_PIPE_NOTES_OK),
+            WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
+            0, 0, 0, 0,
+            hwnd, (HMENU)(INT_PTR)IDOK, cs->hInstance, NULL);
+        if (s_gui.hFont) {
+            if (edit) SendMessageW(edit, WM_SETFONT, (WPARAM)s_gui.hFont, TRUE);
+            if (ok)   SendMessageW(ok,   WM_SETFONT, (WPARAM)s_gui.hFont, TRUE);
+        }
+        Notes_LayoutChildren(hwnd);
+        return 0;
+    }
+    case WM_SIZE:
+        Notes_LayoutChildren(hwnd);
+        return 0;
+    case WM_COMMAND:
+        if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL) {
+            DestroyWindow(hwnd);
+            return 0;
+        }
+        break;
+    case WM_CLOSE:
+        DestroyWindow(hwnd);
+        return 0;
+    case WM_DESTROY:
+        if (s_gui.hwnd_notes == hwnd)
+            s_gui.hwnd_notes = NULL;
+        return 0;
+    }
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+
+void Gui_ShowNotesDialog(HWND parent, const WCHAR *title, const WCHAR *text)
+{
+    const WCHAR *body = (text && text[0]) ? text : I18n_Get(STR_PIPE_NOTES_EMPTY);
+    const WCHAR *ttl  = title ? title : L"Notes";
+
+    static BOOL registered = FALSE;
+    if (!registered) {
+        WNDCLASSEXW wc = {0};
+        wc.cbSize = sizeof(wc);
+        wc.lpfnWndProc = NotesWndProc;
+        wc.hInstance = s_gui.hInstance ? s_gui.hInstance : GetModuleHandleW(NULL);
+        wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+        wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+        wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+        wc.lpszClassName = NOTES_WND_CLASS;
+        RegisterClassExW(&wc);
+        registered = TRUE;
+    }
+
+    /* Reuse the existing modeless window if still open. */
+    if (s_gui.hwnd_notes && IsWindow(s_gui.hwnd_notes)) {
+        SetWindowTextW(s_gui.hwnd_notes, ttl);
+        HWND edit = GetDlgItem(s_gui.hwnd_notes, IDC_NOTES_EDIT);
+        if (edit) SetWindowTextW(edit, body);
+        ShowWindow(s_gui.hwnd_notes, SW_SHOW);
+        SetWindowPos(s_gui.hwnd_notes, HWND_TOP, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        return;
+    }
+
+    int dlg_w = S(640), dlg_h = S(520);
+    RECT pr = {0};
+    if (parent) GetWindowRect(parent, &pr);
+    int x = pr.left + ((pr.right - pr.left) - dlg_w) / 2;
+    int y = pr.top  + ((pr.bottom - pr.top) - dlg_h) / 2;
+    if (x < 0) x = 40;
+    if (y < 0) y = 40;
+
+    /* Owned popup, modeless: main window stays enabled and usable. */
+    s_gui.hwnd_notes = CreateWindowExW(0,
+        NOTES_WND_CLASS, ttl,
+        WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_VISIBLE,
+        x, y, dlg_w, dlg_h,
+        parent, NULL,
+        s_gui.hInstance ? s_gui.hInstance : GetModuleHandleW(NULL),
+        (LPVOID)body);
 }
 
 /* ─── Pipeline (Auto Wheelspin Farm) helpers ──────────────────────── */

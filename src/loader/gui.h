@@ -77,7 +77,10 @@ void    Gui_GetSelectedProfile(WCHAR *out, int max_len);
 /* Show update available notification next to repo link */
 void    Gui_ShowUpdateAvailable(const WCHAR *version, const WCHAR *url);
 
-/* Auto Race page: set profile description text */
+/* Auto Race page: show profile notes in a modeless dialog (on-demand). */
+void    Gui_ShowNotesDialog(HWND parent, const WCHAR *title, const WCHAR *text);
+
+/* Auto Race page: set profile description text (legacy; no-op if control absent) */
 void    Gui_SetProfileDescription(const WCHAR *text);
 
 /* ─── Auto Wheelspin Farm pipeline (on the Auto Race page) ──────────── */

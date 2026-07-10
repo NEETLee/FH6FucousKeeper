@@ -151,23 +151,19 @@ static int RaceProfileSpPerLap(void) {
     return (int)GetPrivateProfileIntW(L"Profile", L"SPPerLap", 0, full);
 }
 
-/* Farming car identity for OCR-based selection, from the race profile's
- * [Profile] CarName / CarPI keys. Falls back to the selected car profile's
- * display name when CarName is absent, so existing profiles keep working. */
+/* Race-car identity for OCR selection: only from the race profile's
+ * [Profile] CarName / CarPI. Do not fall back to the car profile — that
+ * profile is for buy/spin/remove (lottery car), which is unrelated to the
+ * car used for racing. Empty CarName -> OCR skipped, template/current-car. */
 static void RaceProfileCarName(WCHAR *out, int out_len) {
     if (!out || out_len <= 0) return;
     out[0] = L'\0';
     WCHAR sel[PROFILE_NAME_LEN] = {0};
     Gui_GetSelectedProfile(sel, PROFILE_NAME_LEN);
-    if (sel[0]) {
-        WCHAR full[MAX_PATH];
-        _snwprintf(full, MAX_PATH, L"%s%s", Profile_GetDirectory(), sel);
-        GetPrivateProfileStringW(L"Profile", L"CarName", L"", out, out_len, full);
-    }
-    if (!out[0]) {
-        const CarProfile *car = SelectedCar();
-        if (car) wcsncpy(out, car->name, out_len - 1);
-    }
+    if (!sel[0]) return;
+    WCHAR full[MAX_PATH];
+    _snwprintf(full, MAX_PATH, L"%s%s", Profile_GetDirectory(), sel);
+    GetPrivateProfileStringW(L"Profile", L"CarName", L"", out, out_len, full);
 }
 
 static int RaceProfileCarPI(void) {
@@ -396,6 +392,37 @@ static void DoPipelineStop(void) {
     if (s_pipeline) Pipeline_Stop(s_pipeline);
 }
 
+static void DoShowRaceNotes(void) {
+    WCHAR sel[PROFILE_NAME_LEN] = {0};
+    Gui_GetSelectedProfile(sel, PROFILE_NAME_LEN);
+    WCHAR *comments = NULL;
+    if (sel[0]) {
+        WCHAR full_path[MAX_PATH];
+        _snwprintf(full_path, MAX_PATH, L"%s%s", Profile_GetDirectory(), sel);
+        comments = Profile_ReadComments(full_path);
+    }
+    Gui_ShowNotesDialog(Gui_GetMainWindow(),
+                        I18n_Get(STR_PIPE_NOTES_RACE_TITLE), comments);
+    if (comments) free(comments);
+}
+
+static void DoShowCarNotes(void) {
+    WCHAR *comments = NULL;
+    const CarProfile *car = SelectedCar();
+    if (car && car->dir[0]) {
+        WCHAR full_path[MAX_PATH];
+        MultiByteToWideChar(CP_UTF8, 0, car->dir, -1, full_path, MAX_PATH);
+        size_t n = wcslen(full_path);
+        if (n > 0 && full_path[n - 1] != L'\\' && full_path[n - 1] != L'/')
+            wcscat(full_path, L"\\");
+        wcscat(full_path, L"car.ini");
+        comments = Profile_ReadComments(full_path);
+    }
+    Gui_ShowNotesDialog(Gui_GetMainWindow(),
+                        I18n_Get(STR_PIPE_NOTES_CAR_TITLE), comments);
+    if (comments) free(comments);
+}
+
 static const WCHAR *PipelineStageLabel(const char *step) {
     if (!step || !step[0]) return L"-";
     if (strcmp(step, "read_econ") == 0)    return I18n_Get(STR_PIPE_STAGE_READ);
@@ -545,20 +572,11 @@ static LRESULT CALLBACK AppWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
         case IDC_PIPE_BTN_REMOVE: StartPipelineJob(FALSE, PIPE_STEP_REMOVE, PipeManualCount()); return 0;
         case IDC_PIPE_BTN_LOOP:   StartPipelineJob(TRUE, PIPE_STEP_RACE, 0); return 0;
         case IDC_PIPE_BTN_STOP:   DoPipelineStop(); return 0;
+        case IDC_PIPE_BTN_CAR_NOTES:  DoShowCarNotes(); return 0;
+        case IDC_PIPE_BTN_RACE_NOTES: DoShowRaceNotes(); return 0;
 #endif
 
         case IDC_COMBO_PROFILE:
-            if (HIWORD(wParam) == CBN_SELCHANGE) {
-                WCHAR sel[MAX_PATH];
-                Gui_GetSelectedProfile(sel, MAX_PATH);
-                if (sel[0]) {
-                    WCHAR full_path[MAX_PATH];
-                    _snwprintf(full_path, MAX_PATH, L"%s%s", Profile_GetDirectory(), sel);
-                    WCHAR *comments = Profile_ReadComments(full_path);
-                    Gui_SetProfileDescription(comments);
-                    if (comments) free(comments);
-                }
-            }
             return 0;
 
         case IDM_TRAY_SHOW:
@@ -917,15 +935,6 @@ static void DoStartAutoRace(void)
             LOG_E(L"Failed to load profile: %s", sel_name);
             return;
         }
-
-        /* Display profile comments in the description area */
-        {
-            WCHAR full_path[MAX_PATH];
-            _snwprintf(full_path, MAX_PATH, L"%s%s", Profile_GetDirectory(), sel_name);
-            WCHAR *comments = Profile_ReadComments(full_path);
-            Gui_SetProfileDescription(comments);
-            if (comments) free(comments);
-        }
     }
 
     if (RaceCtrl_Start(&s_race_ctrl, s_app.game_hwnd)) {
@@ -1090,13 +1099,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         }
         if (count > 0) {
             Gui_PopulateProfiles(profile_names, count);
-            /* Show initial profile description */
-            WCHAR full_path[MAX_PATH];
-            _snwprintf(full_path, MAX_PATH, L"%s%s",
-                       Profile_GetDirectory(), profile_names[0]);
-            WCHAR *comments = Profile_ReadComments(full_path);
-            Gui_SetProfileDescription(comments);
-            if (comments) free(comments);
         }
     }
 

@@ -4,6 +4,9 @@
  * The share-code entry popup is a separate UWP process (tcui-app.exe CoreWindow),
  * so PostMessage to the game window never reaches it. UI Automation can set the
  * edit value and invoke the confirm button cross-process without typing.
+ *
+ * Presence of this popup is also the runtime signal that the client is
+ * Xbox/Store; Steam has no TCUI page and should type via GameInput_TypeChar.
  */
 
 #ifndef FOCUSKEEPER_XBOX_TEXTENTRY_H

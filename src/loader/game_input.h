@@ -53,6 +53,13 @@ void GameInput_Hover(GameInput *gi, int x, int y);
 void GameInput_Press(GameInput *gi, DWORD vk, int delay_ms);
 
 /*
+ * Type a character into a text field: KEYDOWN + WM_CHAR + KEYUP.
+ * Digits/letters need WM_CHAR for Steam's in-game share-code box
+ * (plain GameInput_Press is not enough there).
+ */
+void GameInput_TypeChar(GameInput *gi, DWORD vk, int delay_ms);
+
+/*
  * hw_key_down / hw_key_up: for hold behaviors (e.g. holding W during race).
  */
 void GameInput_KeyDown(GameInput *gi, DWORD vk);

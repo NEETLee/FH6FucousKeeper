@@ -5,6 +5,19 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.3.5] - 2026-07-10
+
+### 新增
+- **累计计数按最小单位实时刷新**：每买 1 台、抽 1 次、删 1 辆、跑 1 圈立刻更新界面累计，不再等整步结束才加。
+- **配置说明按钮**：车辆 / 赛事旁可点「说明」查看 profile 注释；弹窗更大、可缩放，且为非模态（不锁死主窗口）。
+- **分享码探测式输入**：检测到 Xbox/Store 的 TCUI 文本框则走 UIA；否则按 Steam 用 `WM_CHAR` 逐字输入，不再依赖不可靠的版本判断。
+
+### 变更
+- **跑图车与刷车 profile 解耦**：跑图选车只读赛事配置的 `CarName` / `CarPI`，不再回退到车辆 profile 名字（车辆 profile 专管买车 / 抽奖 / 删车）。
+- **自动赛事页 UI 收紧**：减小多层外边距，状态 / 设置页内容居中；窗口列表与日志区随客户区铺满。
+- **README（中英文）重写**：突出全自动刷图用法与双配置体系说明。
+- Debug 构建窗口标题启动即带 `[DEBUG]` 标记。
+
 ## [1.3.4] - 2026-07-10
 
 ### 修复
@@ -92,6 +105,7 @@
 - 作者签名、GitHub 仓库链接、窗口模式使用提示。
 - 基于 GitHub Actions 的自动构建与发布流水线。
 
+[1.3.5]: https://github.com/NEETLee/FH6FucousKeeper/compare/v1.3.4...v1.3.5
 [1.3.4]: https://github.com/NEETLee/FH6FucousKeeper/compare/v1.3.3...v1.3.4
 [1.3.3]: https://github.com/NEETLee/FH6FucousKeeper/compare/v1.3.2...v1.3.3
 [1.3.2]: https://github.com/NEETLee/FH6FucousKeeper/compare/v1.3.1...v1.3.2

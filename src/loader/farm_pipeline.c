@@ -37,6 +37,20 @@ static void update_step(FarmPipeline *pp, const char *step) {
     LeaveCriticalSection(&pp->cs);
 }
 
+/* Per-unit progress from farm_flow (1 buy / 1 spin / 1 remove / 1 race). */
+static void pipe_unit_done(FarmUnitKind unit, void *ctx) {
+    FarmPipeline *pp = (FarmPipeline *)ctx;
+    if (!pp) return;
+    EnterCriticalSection(&pp->cs);
+    switch (unit) {
+    case FARM_UNIT_BUY:    pp->status.total_bought++; break;
+    case FARM_UNIT_SPIN:   pp->status.total_wheelspins++; break;
+    case FARM_UNIT_REMOVE: pp->status.total_removed++; break;
+    case FARM_UNIT_RACE:   pp->status.total_races++; break;
+    }
+    LeaveCriticalSection(&pp->cs);
+}
+
 static void check_pause(FarmPipeline *pp) {
     while (pp->paused && !pp->stop_requested) {
         Sleep(200);
@@ -236,7 +250,7 @@ int Pipeline_ReadEconomy(FarmPipeline *pp) {
 
 /* ─── Race (timed script via host callbacks) ─────────────────────────── */
 
-/* Vision-based race step: navigate to EventLab, submit the share code via UIA,
+/* Vision-based race step: navigate to EventLab, submit share code (UIA or Steam type),
  * then run races (each finishes with an X-restart).
  *
  * SP-target mode (sp_per_lap > 0 && target_sp > 0): CLOSED LOOP. Race a batch
@@ -335,7 +349,7 @@ void Pipeline_RunStep(FarmPipeline *pp, PipelineStep step, int count) {
 
     switch (step) {
     case PIPE_STEP_RACE:
-        pp->status.total_races += run_race(pp);  /* count every race, not the step */
+        run_race(pp);  /* totals updated per lap via on_unit_done */
         break;
     case PIPE_STEP_READ_ECON:
         Pipeline_ReadEconomy(pp);
@@ -345,7 +359,7 @@ void Pipeline_RunStep(FarmPipeline *pp, PipelineStep step, int count) {
                                                         : pp->cfg.buy_car_count);
         if (n <= 0) n = pp->cfg.buy_car_count > 0 ? pp->cfg.buy_car_count : 1;
         update_step(pp, "buy_car");
-        pp->status.total_bought += Farm_BuyCar(fe, n);
+        Farm_BuyCar(fe, n);
         break;
     }
     case PIPE_STEP_SPIN: {
@@ -353,7 +367,7 @@ void Pipeline_RunStep(FarmPipeline *pp, PipelineStep step, int count) {
                                                         : pp->cfg.wheelspin_count);
         if (n <= 0) n = pp->cfg.wheelspin_count > 0 ? pp->cfg.wheelspin_count : 1;
         update_step(pp, "wheelspin");
-        pp->status.total_wheelspins += Farm_SuperWheelspinMode(fe, n, wmode);
+        Farm_SuperWheelspinMode(fe, n, wmode);
         break;
     }
     case PIPE_STEP_REMOVE: {
@@ -361,7 +375,7 @@ void Pipeline_RunStep(FarmPipeline *pp, PipelineStep step, int count) {
                                                         : pp->cfg.remove_car_count);
         if (n <= 0) n = pp->cfg.remove_car_count > 0 ? pp->cfg.remove_car_count : 1;
         update_step(pp, "remove_car");
-        pp->status.total_removed += Farm_RemoveCarMode(fe, n, rmode);
+        Farm_RemoveCarMode(fe, n, rmode);
         break;
     }
     default:
@@ -406,7 +420,7 @@ void Pipeline_Run(FarmPipeline *pp) {
         /* 1. Race (bank skill points) */
         if (pp->cfg.enable_race && !pp->stop_requested) {
             int rd = run_race(pp);
-            if (rd > 0) { pp->status.total_races += rd; cycle_success = TRUE; }
+            if (rd > 0) cycle_success = TRUE;
         }
 
         /* 2. Read economy -> compute n */
@@ -422,7 +436,6 @@ void Pipeline_Run(FarmPipeline *pp) {
             update_step(pp, "buy_car");
             check_pause(pp);
             int bought = Farm_BuyCar(fe, n);
-            pp->status.total_bought += bought;
             if (bought > 0) cycle_success = TRUE;
         }
 
@@ -432,7 +445,6 @@ void Pipeline_Run(FarmPipeline *pp) {
             check_pause(pp);
             int spins = Farm_SuperWheelspinMode(fe,
                 pp->cfg.auto_count ? n : pp->cfg.wheelspin_count, wmode);
-            pp->status.total_wheelspins += spins;
             if (spins > 0) cycle_success = TRUE;
         }
 
@@ -442,7 +454,6 @@ void Pipeline_Run(FarmPipeline *pp) {
             check_pause(pp);
             int removed = Farm_RemoveCarMode(fe,
                 pp->cfg.auto_count ? n : pp->cfg.remove_car_count, rmode);
-            pp->status.total_removed += removed;
             if (removed > 0) cycle_success = TRUE;
         }
 
@@ -482,6 +493,9 @@ BOOL Pipeline_Init(FarmPipeline *pp, const PipelineConfig *cfg,
     if (!pp || !cfg || !farm_cfg) return FALSE;
     pp->cfg = *cfg;
     pp->farm_cfg = *farm_cfg;
+    /* Live cumulative totals: farm_flow reports each completed unit. */
+    pp->farm_cfg.on_unit_done = pipe_unit_done;
+    pp->farm_cfg.on_unit_done_ctx = pp;
     if (pp->cfg.consecutive_fail_max <= 0) pp->cfg.consecutive_fail_max = 5;
     if (pp->cfg.cost_per_car <= 0) pp->cfg.cost_per_car = 81700;
     if (pp->cfg.sp_per_car <= 0)   pp->cfg.sp_per_car = 30;

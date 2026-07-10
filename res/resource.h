@@ -97,6 +97,8 @@
 #define IDC_PIPE_CHK_SPIN       1119
 #define IDC_PIPE_CHK_REMOVE     1120
 #define IDC_PIPE_LOG            1121
+#define IDC_PIPE_BTN_CAR_NOTES  1122
+#define IDC_PIPE_BTN_RACE_NOTES 1123
 
 /* Tray icon */
 #define IDI_APP_ICON        200

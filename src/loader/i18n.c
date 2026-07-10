@@ -144,6 +144,11 @@ static const WCHAR *s_strings_zh[STR_COUNT] = {
     /* STR_PIPE_ERR_NO_ASSETS */ L"\u627e\u4e0d\u5230\u6a21\u677f\u8d44\u6e90 (assets/templates)\u3002\u8bf7\u4ece build \u76ee\u5f55\u542f\u52a8\u3002",
     /* STR_PIPE_ERR_INIT */     L"\u6d41\u6c34\u7ebf\u521d\u59cb\u5316\u5931\u8d25\u3002",
     /* STR_PIPE_ERR_THREAD */   L"\u65e0\u6cd5\u542f\u52a8\u5de5\u4f5c\u7ebf\u7a0b\u3002",
+    /* STR_PIPE_BTN_NOTES */    L"\u8bf4\u660e",
+    /* STR_PIPE_NOTES_CAR_TITLE */  L"\u8f66\u8f86\u914d\u7f6e\u8bf4\u660e",
+    /* STR_PIPE_NOTES_RACE_TITLE */ L"\u8d5b\u4e8b\u914d\u7f6e\u8bf4\u660e",
+    /* STR_PIPE_NOTES_EMPTY */  L"\u5f53\u524d\u914d\u7f6e\u6ca1\u6709\u8bf4\u660e\u6ce8\u91ca\u3002",
+    /* STR_PIPE_NOTES_OK */     L"\u786e\u5b9a",
 };
 
 /* ─── English String Table ────────────────────────────────────────── */
@@ -281,6 +286,11 @@ static const WCHAR *s_strings_en[STR_COUNT] = {
     /* STR_PIPE_ERR_NO_ASSETS */ L"Template assets (assets/templates) not found. Launch from the build directory.",
     /* STR_PIPE_ERR_INIT */     L"Pipeline init failed.",
     /* STR_PIPE_ERR_THREAD */   L"Failed to start worker thread.",
+    /* STR_PIPE_BTN_NOTES */    L"Notes",
+    /* STR_PIPE_NOTES_CAR_TITLE */  L"Car Profile Notes",
+    /* STR_PIPE_NOTES_RACE_TITLE */ L"Race Profile Notes",
+    /* STR_PIPE_NOTES_EMPTY */  L"This profile has no comment notes.",
+    /* STR_PIPE_NOTES_OK */     L"OK",
 };
 
 /* ─── Traditional Chinese String Table ────────────────────────────── */
@@ -418,6 +428,11 @@ static const WCHAR *s_strings_zh_tw[STR_COUNT] = {
     /* STR_PIPE_ERR_NO_ASSETS */ L"\u627e\u4e0d\u5230\u6a21\u677f\u8cc7\u6e90 (assets/templates)\u3002\u8acb\u5f9e build \u76ee\u9304\u555f\u52d5\u3002",
     /* STR_PIPE_ERR_INIT */     L"\u6d41\u6c34\u7dda\u521d\u59cb\u5316\u5931\u6557\u3002",
     /* STR_PIPE_ERR_THREAD */   L"\u7121\u6cd5\u555f\u52d5\u5de5\u4f5c\u7dda\u7a0b\u3002",
+    /* STR_PIPE_BTN_NOTES */    L"\u8aaa\u660e",
+    /* STR_PIPE_NOTES_CAR_TITLE */  L"\u8eca\u8f1b\u8a2d\u5b9a\u8aaa\u660e",
+    /* STR_PIPE_NOTES_RACE_TITLE */ L"\u8cfd\u4e8b\u8a2d\u5b9a\u8aaa\u660e",
+    /* STR_PIPE_NOTES_EMPTY */  L"\u7576\u524d\u8a2d\u5b9a\u6c92\u6709\u8aaa\u660e\u8a3b\u89e3\u3002",
+    /* STR_PIPE_NOTES_OK */     L"\u78ba\u5b9a",
 };
 
 /* ─── Public API ──────────────────────────────────────────────────── */

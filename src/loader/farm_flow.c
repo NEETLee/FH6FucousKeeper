@@ -66,6 +66,11 @@ static BOOL check_stop(FarmEngine *fe) {
     return fe->stop_requested;
 }
 
+static void unit_done(FarmEngine *fe, FarmUnitKind unit) {
+    if (fe && fe->cfg.on_unit_done)
+        fe->cfg.on_unit_done(unit, fe->cfg.on_unit_done_ctx);
+}
+
 static void farm_sleep(FarmEngine *fe, int ms) {
     (void)fe;
     Sleep(ms);
@@ -511,6 +516,7 @@ int Farm_BuyCar(FarmEngine *fe, int target_count) {
         key(fe, VK_RETURN, 80); farm_sleep(fe, 700);
 
         fe->car_counter++;
+        unit_done(fe, FARM_UNIT_BUY);
         snprintf(msg, sizeof(msg), "buy_car: purchased %d/%d", fe->car_counter, target_count);
         farm_log(fe, msg);
     }
@@ -678,6 +684,7 @@ int Farm_SuperWheelspinMode(FarmEngine *fe, int target_count, int mode) {
                      "wheelspin: skills already spent (EXPwU %.2f), skip", exp.score);
             farm_log(fe, expmsg);
             counter++;
+            unit_done(fe, FARM_UNIT_SPIN);
         } else {
             farm_sleep(fe, 1000);
             key(fe, VK_RETURN, 80);
@@ -699,6 +706,7 @@ int Farm_SuperWheelspinMode(FarmEngine *fe, int target_count, int mode) {
                 return counter;
             }
             counter++;
+            unit_done(fe, FARM_UNIT_SPIN);
             snprintf(msg, sizeof(msg), "wheelspin: completed %d/%d", counter, target_count);
             farm_log(fe, msg);
         }
@@ -809,6 +817,7 @@ int Farm_RemoveCarMode(FarmEngine *fe, int target_count, int mode) {
             farm_sleep(fe, 1500);
 
             counter++;
+            unit_done(fe, FARM_UNIT_REMOVE);
             snprintf(msg, sizeof(msg), "remove_car: removed %d/%d", counter, target_count);
             farm_log(fe, msg);
         }
@@ -917,6 +926,7 @@ int Farm_RemoveCarMode(FarmEngine *fe, int target_count, int mode) {
             farm_sleep(fe, 1200);
 
             counter++;
+            unit_done(fe, FARM_UNIT_REMOVE);
             snprintf(msg, sizeof(msg), "remove_car: removed %d/%d", counter, target_count);
             farm_log(fe, msg);
         }
@@ -1261,19 +1271,18 @@ int Farm_Race(FarmEngine *fe, const char *share_code, int target_count) {
     GameInput_Press(fe->input, VK_RETURN, 80);
     farm_sleep(fe, 1200);
 
-    /* Fill + confirm the share code via UI Automation. The popup is a separate
-     * UWP process, so PostMessage to the game window can't reach it; UIA sets
-     * the edit value and invokes 确定 cross-process. Fall back to typing
-     * (rarely works for this popup) only if UIA fails. */
-    if (XboxTextEntry_SubmitShareCode(share_code, 8000)) {
-        farm_log(fe, "race: share code submitted via UIA");
+    /* Share-code entry by popup probe (do not trust GameVersion):
+     *   - TCUI TextEntryPage present → Xbox/Store: UIA SetValue + 确定
+     *   - otherwise → Steam: PostMessage KEYDOWN+WM_CHAR+KEYUP to game HWND */
+    if (XboxTextEntry_SubmitShareCode(share_code, 3000)) {
+        farm_log(fe, "race: share code via UIA (Xbox/Store popup)");
     } else {
-        farm_log(fe, "race: UIA submit failed, falling back to typing");
+        farm_log(fe, "race: no UIA popup, typing share code (Steam)");
         for (const char *p = share_code; *p; p++) {
             if (check_stop(fe)) return counter;
             if (*p >= '0' && *p <= '9') {
-                GameInput_Press(fe->input, (DWORD)*p, 50);
-                farm_sleep(fe, 50);
+                GameInput_TypeChar(fe->input, (DWORD)*p, 80);
+                farm_sleep(fe, 80);
             }
         }
         farm_sleep(fe, 400);
@@ -1519,6 +1528,7 @@ int Farm_Race(FarmEngine *fe, const char *share_code, int target_count) {
         dismiss_social_popup(fe);
 
         counter++;
+        unit_done(fe, FARM_UNIT_RACE);
         snprintf(msg, sizeof(msg), "race: completed %d/%d", counter, target_count);
         farm_log(fe, msg);
     }
