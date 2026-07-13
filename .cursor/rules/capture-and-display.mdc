@@ -1,0 +1,53 @@
+---
+description: WGC 屏幕捕获与显示模式的约束和排障经验（识别失败先查捕获层，再查模板）。改动 screen_capture_wgc.cpp / farm 视觉流水线，或排查"识别不到/某分辨率失效"时必读。
+alwaysApply: false
+---
+
+# 屏幕捕获与显示模式
+
+## 运行前提：只支持窗口模式
+
+- 工具**始终在窗口模式**下运行游戏（Win10、Win11 都一样），**不使用独占全屏**。
+  WGC 捕获对独占全屏支持差，且团队工作流固定用窗口模式。
+- 任何"识别失败"的复现和修复都以**窗口模式**为准，别用全屏去验证。
+
+## WGC 捕获的三个尺寸互不相等（Win10 上尤其明显）
+
+同一个游戏窗口，可能同时存在三种不同的尺寸，**不要用窗口 rect 去猜 WGC 内容尺寸**：
+
+- `GetWindowRect`（外框，含边框/标题栏）—— 例：1616×939
+- `GetClientRect`（客户区 = 游戏内部渲染分辨率）—— 例：1600×900
+- **WGC 实际交付的内容尺寸**（`IGraphicsCaptureItem.Size` / 帧的 `ContentSize`）—— 例：1602×932
+
+三者可以两两不等。用外框或客户区去建 `Direct3D11CaptureFramePool`，会让"内容尺寸 ≠ 帧池尺寸"长期成立。
+
+## 关键坑：帧池尺寸不匹配 + Recreate 静默失败 = 永远黑帧
+
+- `PullFrame` 里有"内容尺寸 ≠ 帧池尺寸就 `Recreate` 帧池并跳过该帧"的逻辑。
+- **在 Win10 上 `Recreate` 会静默失败**（帧池尺寸永远收敛不到内容尺寸），于是每一帧都被跳过，
+  `ScreenCapture_GrabFrame` 永远返回 FALSE，`TM_SetFrame` 从不被调用，
+  模板匹配对着空帧（0×0）全部得 0.000 —— 表现为"某系统/某分辨率识别不了"。
+- **Win11 上同一套逻辑能过**，所以极易误判为"分辨率/模板"问题。真正差异在系统层的 WGC 行为。
+
+### 修复原则（已落地，勿回退）
+
+1. 帧池尺寸优先取 `IGraphicsCaptureItem.get_Size`（slot 7），而不是窗口 rect。
+2. **兜底自愈**：`Recreate` 失败时**不要永久丢帧**，按帧的实际纹理尺寸把这一帧交付出去。
+   ~1% 的缩放差由多尺度模板匹配吸收，远好于"识别全灭"。
+
+## 排障顺序：先捕获层，后模板层
+
+"识别不到 / 某分辨率失效"时，先确认捕获是否真的出帧，再怀疑模板/阈值/缩放：
+
+- DEBUG 版看 `FocusKeeper.log` 里的 `FarmGrab: ok=?/8 ... pull_stage=? content=?x? pool=?x?`。
+  - `ok=0/8` 或 `dims=0x0` → 捕获层坏了（帧池/尺寸/Recreate），**别去动模板**。
+  - `pull_stage=2` 反复出现 → 卡在帧池 Recreate/跳帧分支。
+  - `pull_stage=9`、`ok=8/8` → 捕获正常，再去看 `menu_visible` / `vehicles_tab_visible` 的打分。
+- 想对静态帧验证模板本身是否 OK，用 `build/capture_frame.exe out.png` 抓干净帧，
+  再 `build/test_match_all.exe out.png` 打分。**注意**：静态帧能识别 ≠ 实时能识别，
+  因为实时可能根本没出帧（本坑的核心）。
+
+## 反面教训：离线分辨率回归无意义
+
+- 曾用 2K fixture 缩放到 1080p 做离线 `test_resolution` 断言，全绿——但实机因为捕获层黑帧照样全灭。
+- 与 `testing-workflow.mdc` 一致：**本项目只做实机回归，离线视觉回归会给假信心，别做**。

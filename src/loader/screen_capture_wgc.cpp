@@ -112,8 +112,23 @@ static struct {
     BOOL                 initialized;
     CRITICAL_SECTION     cs;
 
+    /* Debug: last PullFrame outcome (stage where it stopped) + content size.
+     * stage: 0=none 1=tryget-null 2=resize-skip 3=surface-fail 4=access-fail
+     *        5=staging/map-fail 9=success */
+    int                  dbg_stage;
+    int                  dbg_cs_w, dbg_cs_h;
+
     PFN_CreateDirect3D11DeviceFromDXGIDevice pfnCreate;
 } s_wgc = {};
+
+extern "C" void ScreenCapture_DebugPull(int *stage, int *cs_w, int *cs_h,
+                                        int *pool_w, int *pool_h) {
+    if (stage)  *stage  = s_wgc.dbg_stage;
+    if (cs_w)   *cs_w   = s_wgc.dbg_cs_w;
+    if (cs_h)   *cs_h   = s_wgc.dbg_cs_h;
+    if (pool_w) *pool_w = s_wgc.pool_w;
+    if (pool_h) *pool_h = s_wgc.pool_h;
+}
 
 /* ─── Helpers ────────────────────────────────────────────────────── */
 
@@ -182,7 +197,7 @@ static BOOL PullFrame(void)
     FN_TryGet fnTry = (FN_TryGet)(SLOT(s_wgc.frame_pool, 7));
     void *frame_obj = nullptr;
     HRESULT hr = fnTry(s_wgc.frame_pool, &frame_obj);
-    if (FAILED(hr) || !frame_obj) return FALSE;
+    if (FAILED(hr) || !frame_obj) { s_wgc.dbg_stage = 1; return FALSE; }
 
     /* Handle game resolution / window-size changes: when the captured content
      * size differs from the frame-pool size, recreate the pool at the new size.
@@ -192,20 +207,29 @@ static BOOL PullFrame(void)
         typedef HRESULT (STDMETHODCALLTYPE *FN_GetCS)(void*, SizeInt32*);
         FN_GetCS fnCS = (FN_GetCS)(SLOT(frame_obj, 8));
         SizeInt32 cs = {0, 0};
-        if (fnCS && SUCCEEDED(fnCS(frame_obj, &cs)) &&
-            cs.Width > 0 && cs.Height > 0 &&
+        if (fnCS && SUCCEEDED(fnCS(frame_obj, &cs))) {
+            s_wgc.dbg_cs_w = cs.Width;
+            s_wgc.dbg_cs_h = cs.Height;
+        }
+        if (cs.Width > 0 && cs.Height > 0 &&
             (cs.Width != s_wgc.pool_w || cs.Height != s_wgc.pool_h)) {
             typedef HRESULT (STDMETHODCALLTYPE *FN_Recreate)(
                 void*, void*, INT32, INT32, SizeInt32);
             FN_Recreate fnRe = (FN_Recreate)(SLOT(s_wgc.frame_pool, 6));
             if (fnRe && SUCCEEDED(fnRe(s_wgc.frame_pool, s_wgc.winrt_device,
                                        87/*B8G8R8A8*/, 1, cs))) {
+                /* Recreate took effect: this frame is from the old pool, so skip
+                 * it; the next pull comes from the correctly-sized pool. */
                 s_wgc.pool_w = cs.Width;
                 s_wgc.pool_h = cs.Height;
+                s_wgc.dbg_stage = 2;
+                SafeRelease(&frame_obj);
+                return FALSE;
             }
-            /* This frame is from the old pool; skip it. Next pull is correct. */
-            SafeRelease(&frame_obj);
-            return FALSE;
+            /* Recreate failed (observed on Win10): do NOT skip forever. Fall
+             * through and deliver this frame at its actual texture size. The
+             * content may be scaled into the pool buffer by a hair, which the
+             * multi-scale matcher tolerates - far better than going blind. */
         }
     }
 
@@ -214,6 +238,7 @@ static BOOL PullFrame(void)
     void *surface = nullptr;
     hr = fnSurf(frame_obj, &surface);
     if (FAILED(hr) || !surface) {
+        s_wgc.dbg_stage = 3;
         SafeRelease(&frame_obj);
         return FALSE;
     }
@@ -231,7 +256,7 @@ static BOOL PullFrame(void)
 
     SafeRelease(&surface);
     SafeRelease(&frame_obj);
-    if (!tex) return FALSE;
+    if (!tex) { s_wgc.dbg_stage = 4; return FALSE; }
 
     D3D11_TEXTURE2D_DESC td;
     tex->GetDesc(&td);
@@ -255,6 +280,7 @@ static BOOL PullFrame(void)
             ok = TRUE;
         }
     }
+    s_wgc.dbg_stage = ok ? 9 : 5;
 
     LeaveCriticalSection(&s_wgc.cs);
     tex->Release();
@@ -331,12 +357,34 @@ BOOL ScreenCapture_StartCapture(HWND target_hwnd)
     ((IUnknown*)interop)->Release();
     if (FAILED(hr) || !s_wgc.capture_item) return FALSE;
 
-    /* Determine capture size from window rect */
+    /* Determine capture size from the capture ITEM, not the window rect.
+     *
+     * The size WGC actually delivers matches neither GetWindowRect (outer, incl.
+     * borders/title) nor GetClientRect (the game's internal render res). On Win10
+     * windowed FH6 we measured winrect=1616x939, client=1600x900 but WGC content
+     * =1602x932 - a third value. Creating the pool from any window rect therefore
+     * left content != pool forever, and PullFrame skipped every frame via the
+     * "recreate + skip" branch (which did not take effect here), delivering a
+     * blank 0x0 frame. IGraphicsCaptureItem.Size is the authoritative source and
+     * is consistent across Win10/Win11, so query it directly. */
     SizeInt32 item_size = {0, 0};
-    RECT rc;
-    GetWindowRect(target_hwnd, &rc);
-    item_size.Width = rc.right - rc.left;
-    item_size.Height = rc.bottom - rc.top;
+    {
+        typedef HRESULT (STDMETHODCALLTYPE *FN_GetSize)(void*, SizeInt32*);
+        FN_GetSize fnSize = (FN_GetSize)(SLOT(s_wgc.capture_item, 7));
+        if (fnSize) fnSize(s_wgc.capture_item, &item_size);
+    }
+    if (item_size.Width <= 0 || item_size.Height <= 0) {
+        RECT rc;
+        if (GetClientRect(target_hwnd, &rc) && (rc.right - rc.left) > 0 &&
+            (rc.bottom - rc.top) > 0) {
+            item_size.Width = rc.right - rc.left;
+            item_size.Height = rc.bottom - rc.top;
+        } else {
+            GetWindowRect(target_hwnd, &rc);
+            item_size.Width = rc.right - rc.left;
+            item_size.Height = rc.bottom - rc.top;
+        }
+    }
     if (item_size.Width <= 0) item_size.Width = 1920;
     if (item_size.Height <= 0) item_size.Height = 1080;
 

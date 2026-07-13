@@ -48,6 +48,12 @@ BOOL ScreenCapture_GrabFrame(CaptureFrame *frame);
 /* Check if capture is currently active. */
 BOOL ScreenCapture_IsActive(void);
 
+/* Debug: report the last PullFrame outcome. stage: 0=none 1=tryget-null
+ * 2=resize-skip 3=surface-fail 4=access-fail 5=staging/map-fail 9=success.
+ * Only meaningful for the WGC backend; GDI backend leaves stage at 0. */
+void ScreenCapture_DebugPull(int *stage, int *cs_w, int *cs_h,
+                             int *pool_w, int *pool_h);
+
 #ifdef __cplusplus
 }
 #endif

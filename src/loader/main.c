@@ -113,11 +113,23 @@ static BOOL FarmGrab(void *ctx) {
     (void)ctx;
     CaptureFrame last = {0};
     BOOL got = FALSE;
+    int ok_count = 0;
     for (int i = 0; i < 8; i++) {
         CaptureFrame f = {0};
-        if (ScreenCapture_GrabFrame(&f)) { last = f; got = TRUE; }
+        if (ScreenCapture_GrabFrame(&f)) { last = f; got = TRUE; ok_count++; }
         Sleep(45);
     }
+#ifdef FK_DEBUG
+    {
+        int stage = 0, cs_w = 0, cs_h = 0, pw = 0, ph = 0;
+        ScreenCapture_DebugPull(&stage, &cs_w, &cs_h, &pw, &ph);
+        Logger_LogFileOnly(ok_count < 8 ? LOG_WARN : LOG_INFO,
+            L"[farm] FarmGrab: ok=%d/8 active=%d dims=%dx%d pull_stage=%d "
+            L"content=%dx%d pool=%dx%d",
+            ok_count, (int)ScreenCapture_IsActive(),
+            last.width, last.height, stage, cs_w, cs_h, pw, ph);
+    }
+#endif
     if (!got || !last.pixels) return FALSE;
     TM_SetFrame(last.pixels, last.width, last.height, last.stride);
     return TRUE;

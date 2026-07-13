@@ -239,17 +239,39 @@ static BOOL menu_visible(FarmEngine *fe) {
     grab(fe);
     TMRegion left = TM_NamedRegion("left");
     TMResult cj = TM_FindGray(tmpl(fe, "collectionjournal.png"), 0.70, TRUE, FALSE, left);
-    if (cj.found) return TRUE;
     TMResult bn = TM_FindGray(tmpl(fe, "BNandUC.png"), 0.65, TRUE, FALSE, left);
-    if (bn.found) return TRUE;
     /* FH logo / tab bar – present on every main-menu tab. */
     TMResult logo = TM_FindGray(tmpl(fe, "horizon6.png"), 0.65, TRUE, FALSE,
                                 TM_NamedRegion("full"));
-    return logo.found;
+#ifdef FK_DEBUG
+    {
+        int fw = 0, fh = 0;
+        TM_GetFrameSize(&fw, &fh);
+        char m[160];
+        snprintf(m, sizeof(m),
+                 "menu_visible: cj=%.3f bn=%.3f logo=%.3f (frame %dx%d)",
+                 cj.score, bn.score, logo.score, fw, fh);
+        farm_log(fe, m);
+        TMResult best = cj;
+        if (bn.score > best.score) best = bn;
+        if (logo.score > best.score) best = logo;
+        FARM_SNAP(fe, "menuvis", best);
+    }
+#endif
+    return cj.found || bn.found || logo.found;
 }
 
 static BOOL vehicles_tab_visible(FarmEngine *fe) {
     TMResult r = find_best(fe, "BNandUC.png", "left");
+#ifdef FK_DEBUG
+    {
+        char m[128];
+        snprintf(m, sizeof(m), "vehicles_tab_visible: BNandUC best=%.3f scale=%.3f",
+                 r.score, r.scale);
+        farm_log(fe, m);
+        FARM_SNAP(fe, "vehtab", r);
+    }
+#endif
     return r.found && r.score >= 0.65;
 }
 
