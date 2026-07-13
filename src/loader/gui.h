@@ -42,6 +42,7 @@ void    Gui_ClearLog(void);
 
 /* Refresh the window list */
 void    Gui_RefreshWindowList(const FindResult *result);
+int     Gui_GetSelectedWindowIndex(void);
 
 /* Get the main dialog handle */
 HWND    Gui_GetMainWindow(void);
@@ -116,5 +117,6 @@ int     Gui_GetSelectedCarProfile(void);
 
 /* Enable/disable pipeline buttons for the running state. */
 void    Gui_SetPipelineRunning(BOOL running);
+void    Gui_SetFarmAvailable(BOOL available, const WCHAR *reason);
 
 #endif /* FOCUSKEEPER_GUI_H */

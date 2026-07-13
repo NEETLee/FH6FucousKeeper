@@ -25,6 +25,7 @@
 static HHOOK  s_hook_handle  SHARED = NULL;
 static HWND   s_target_hwnd  SHARED = NULL;
 static BOOL   s_active       SHARED = FALSE;
+static BOOL   s_subclass_ready SHARED = FALSE;
 static DWORD  s_target_tid   SHARED = 0;
 static DWORD  s_target_pid   SHARED = 0;
 
@@ -223,6 +224,7 @@ static LRESULT CALLBACK SubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
             s_orig_wndproc = (WNDPROC)SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)SubclassProc);
             if (s_orig_wndproc) {
                 s_subclassed = TRUE;
+                s_subclass_ready = TRUE;
             }
         }
         return 0;
@@ -233,6 +235,7 @@ static LRESULT CALLBACK SubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
             SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)s_orig_wndproc);
             s_subclassed = FALSE;
             s_orig_wndproc = NULL;
+            s_subclass_ready = FALSE;
         }
         return 0;
 
@@ -264,6 +267,7 @@ static LRESULT CALLBACK HookProc(int nCode, WPARAM wParam, LPARAM lParam)
                 cwp->hwnd, GWLP_WNDPROC, (LONG_PTR)SubclassProc);
             if (s_orig_wndproc) {
                 s_subclassed = TRUE;
+                s_subclass_ready = TRUE;
             }
         }
     }
@@ -289,6 +293,7 @@ BOOL APIENTRY DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
             SetWindowLongPtr(s_target_hwnd, GWLP_WNDPROC, (LONG_PTR)s_orig_wndproc);
             s_subclassed = FALSE;
         }
+        s_subclass_ready = FALSE;
         break;
     }
     return TRUE;
@@ -305,6 +310,7 @@ HOOK_API BOOL Hook_Install(HWND target_hwnd)
     s_target_tid = GetWindowThreadProcessId(target_hwnd, &s_target_pid);
 
     if (s_target_tid == 0) return FALSE;
+    s_subclass_ready = FALSE;
 
     s_hook_handle = SetWindowsHookEx(
         WH_CALLWNDPROC,
@@ -317,7 +323,9 @@ HOOK_API BOOL Hook_Install(HWND target_hwnd)
 
     s_active = TRUE;
 
-    SendMessage(target_hwnd, WM_NULL, 0, 0);
+    DWORD_PTR ignored = 0;
+    SendMessageTimeoutW(target_hwnd, WM_NULL, 0, 0,
+                        SMTO_ABORTIFHUNG | SMTO_BLOCK, 500, &ignored);
 
     return TRUE;
 }
@@ -330,12 +338,15 @@ HOOK_API void Hook_Uninstall(void)
 
     s_target_hwnd = NULL;
     s_active = FALSE;
+    s_subclass_ready = FALSE;
 
     /* Clear all virtual keys before unhooking */
     memset((void *)s_virtual_keys, 0, VK_BITMAP_SIZE);
 
     if (target && IsWindow(target)) {
-        SendMessage(target, WM_HOOK_UNSUBCLASS, 0, 0);
+        DWORD_PTR ignored = 0;
+        SendMessageTimeoutW(target, WM_HOOK_UNSUBCLASS, 0, 0,
+                            SMTO_ABORTIFHUNG | SMTO_BLOCK, 500, &ignored);
     }
 
     if (s_hook_handle) {
@@ -350,6 +361,11 @@ HOOK_API void Hook_Uninstall(void)
 HOOK_API BOOL Hook_IsActive(void)
 {
     return s_active;
+}
+
+HOOK_API BOOL Hook_IsSubclassed(void)
+{
+    return s_active && s_subclass_ready;
 }
 
 HOOK_API void Hook_GetStats(HookStats *out)

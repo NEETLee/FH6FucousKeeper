@@ -448,12 +448,21 @@ void Pipeline_Run(FarmPipeline *pp) {
             if (spins > 0) cycle_success = TRUE;
         }
 
-        /* 4. Remove n (mode 1, image-recognition) */
-        if (pp->cfg.enable_remove_car && n > 0 && !pp->stop_requested) {
+        /* 4. Remove (mode 1, image-recognition).
+         *
+         * The remove count is deliberately decoupled from the SP-derived buy
+         * quantity `n`. Only in a coupled auto buy/spin cycle does removing the
+         * just-processed batch (n) make sense. When remove runs on its own
+         * (buy/spin disabled this run), honor the manual count field so a
+         * "remove-only" loop deletes what the user asked for (e.g. 99) instead
+         * of the SP-based n, which can be as low as 1. */
+        int remove_n = ((pp->cfg.enable_buy_car || pp->cfg.enable_wheelspin) &&
+                        pp->cfg.auto_count)
+                     ? n : pp->cfg.remove_car_count;
+        if (pp->cfg.enable_remove_car && remove_n > 0 && !pp->stop_requested) {
             update_step(pp, "remove_car");
             check_pause(pp);
-            int removed = Farm_RemoveCarMode(fe,
-                pp->cfg.auto_count ? n : pp->cfg.remove_car_count, rmode);
+            int removed = Farm_RemoveCarMode(fe, remove_n, rmode);
             if (removed > 0) cycle_success = TRUE;
         }
 

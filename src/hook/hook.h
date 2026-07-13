@@ -39,6 +39,7 @@ typedef struct {
 HOOK_API BOOL    Hook_Install(HWND target_hwnd);
 HOOK_API void    Hook_Uninstall(void);
 HOOK_API BOOL    Hook_IsActive(void);
+HOOK_API BOOL    Hook_IsSubclassed(void);
 HOOK_API void    Hook_GetStats(HookStats *out);
 HOOK_API void    Hook_ResetStats(void);
 HOOK_API HWND    Hook_GetTarget(void);

@@ -22,6 +22,18 @@ typedef enum {
     GAME_VERSION_STORE
 } GameVersion;
 
+typedef enum {
+    TARGET_KIND_NONE = 0,
+    TARGET_KIND_FH6,
+    TARGET_KIND_GENERIC
+} TargetKind;
+
+typedef enum {
+    TARGET_SOURCE_NONE = 0,
+    TARGET_SOURCE_AUTO,
+    TARGET_SOURCE_MANUAL
+} TargetSource;
+
 /* Information about a candidate window */
 typedef struct {
     HWND    hwnd;
@@ -31,6 +43,7 @@ typedef struct {
     WCHAR   class_name[256];
     WCHAR   process_name[MAX_PATH];
     BOOL    is_visible;
+    BOOL    is_fh6;
     GameVersion detected_version;
 } WindowInfo;
 
@@ -57,6 +70,12 @@ BOOL        WinFinder_EnumAll(FindResult *result);
 
 /* Get process name from PID */
 BOOL        WinFinder_GetProcessName(DWORD pid, WCHAR *name, int name_len);
+
+/* Strong classification used to gate FH6-only automation. */
+BOOL        WinFinder_IsFH6Window(HWND hwnd);
+/* For an FH6 UWP frame, return the actual CoreWindow owned by the game
+ * process. Generic/top-level targets are returned unchanged. */
+HWND        WinFinder_ResolveTargetWindow(HWND hwnd);
 
 /* Known process names for FH6 */
 #define FH6_STEAM_PROCESS   L"ForzaHorizon6.exe"

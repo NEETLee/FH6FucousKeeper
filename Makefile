@@ -87,7 +87,7 @@ RES_OBJ = $(BUILD_DIR)/app_res.o
 
 # ─── Targets ──────────────────────────────────────────────────────────
 
-.PHONY: all clean rebuild dll exe dirs farm farm-release farm-replay
+.PHONY: all clean rebuild dll exe dirs farm farm-release farm-replay test-generic-hook capture-frame test-resolution
 
 all: dirs dll exe profiles
 
@@ -217,6 +217,34 @@ farm-replay: dirs $(BUILD_DIR)/template_match.o $(BUILD_DIR)/ocr_engine_wrt.o
 		$(OPENCV_LIBS)
 	@echo "[OK] Built $(BUILD_DIR)/farm_replay.exe"
 	@echo "Run: $(BUILD_DIR)/farm_replay.exe <frame.png> [lang]"
+
+test-generic-hook: dirs dll
+	$(CC) $(CFLAGS) -mconsole -o $(BUILD_DIR)/test_generic_hook.exe \
+		$(TEST_DIR)/test_generic_hook.c $(SRC_LOADER)/hook_manager.c \
+		-L$(BUILD_DIR) -lhook -luser32
+	$(BUILD_DIR)/test_generic_hook.exe
+
+# Curate clean reference frames for the resolution harness (no state mutation).
+capture-frame: dirs $(BUILD_DIR)/screen_capture_wgc.o
+	$(CXX) $(CXXFLAGS) $(OPENCV_CFLAGS) -mconsole -municode -I$(SRC_LOADER) \
+		-o $(BUILD_DIR)/capture_frame.exe \
+		$(TEST_DIR)/capture_frame.cpp \
+		$(BUILD_DIR)/screen_capture_wgc.o \
+		-ld3d11 -ldxgi -lwindowsapp -lruntimeobject -lole32 -loleaut32 \
+		-lgdi32 -luser32 $(OPENCV_LIBS)
+	@echo "[OK] Built $(BUILD_DIR)/capture_frame.exe"
+	@echo "Run: $(BUILD_DIR)/capture_frame.exe <out.png>"
+
+# Offline multi-resolution validation: downscale/upscale curated 2K reference
+# frames and assert the real matcher still locks every anchor above its runtime
+# threshold. Guards against resolution regressions before a live spot-check.
+test-resolution: dirs $(BUILD_DIR)/template_match.o
+	$(CXX) $(CXXFLAGS) $(OPENCV_CFLAGS) -mconsole -I$(SRC_LOADER) \
+		-o $(BUILD_DIR)/test_resolution.exe \
+		$(TEST_DIR)/test_resolution.cpp \
+		$(BUILD_DIR)/template_match.o \
+		-lgdi32 -luser32 $(OPENCV_LIBS)
+	$(BUILD_DIR)/test_resolution.exe
 
 clean:
 	@rm -rf $(BUILD_DIR) $(DIST_DIR)

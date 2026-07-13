@@ -76,6 +76,8 @@ static struct {
     HFONT       hFontStatus;
     HBRUSH      hBrushBg;
     BOOL        hook_active;
+    BOOL        farm_available;
+    BOOL        pipeline_running;
 } s_gui = {0};
 
 /* ─── Forward Declarations ────────────────────────────────────────── */
@@ -405,6 +407,12 @@ void Gui_RefreshWindowList(const FindResult *result)
         _snwprintf(hwnd_str, 31, L"0x%08X", (unsigned)(UINT_PTR)info->hwnd);
         ListView_SetItemText(s_gui.hwnd_listview, i, 4, hwnd_str);
     }
+}
+
+int Gui_GetSelectedWindowIndex(void)
+{
+    if (!s_gui.hwnd_listview) return -1;
+    return ListView_GetNextItem(s_gui.hwnd_listview, -1, LVNI_SELECTED);
 }
 
 HWND Gui_GetMainWindow(void)
@@ -1439,14 +1447,43 @@ void Gui_SetPipelineRunning(BOOL running)
 {
     HWND page = s_gui.pages[4];
     if (!page) return;
+    s_gui.pipeline_running = running;
     int step_btns[] = { IDC_PIPE_BTN_RACE, IDC_PIPE_BTN_READ, IDC_PIPE_BTN_BUY,
                         IDC_PIPE_BTN_SPIN, IDC_PIPE_BTN_REMOVE, IDC_PIPE_BTN_LOOP };
     for (size_t i = 0; i < sizeof(step_btns)/sizeof(step_btns[0]); i++) {
         HWND b = GetDlgItem(page, step_btns[i]);
-        if (b) EnableWindow(b, !running);
+        if (b) EnableWindow(b, !running && s_gui.farm_available);
     }
     HWND stop = GetDlgItem(page, IDC_PIPE_BTN_STOP);
     if (stop) EnableWindow(stop, running);
+    if (s_gui.hwnd_btn_race_start)
+        EnableWindow(s_gui.hwnd_btn_race_start,
+                     !running && s_gui.farm_available);
+}
+
+void Gui_SetFarmAvailable(BOOL available, const WCHAR *reason)
+{
+    s_gui.farm_available = available;
+    HWND page = s_gui.pages[4];
+    if (!page) return;
+
+    int controls[] = {
+        IDC_PIPE_BTN_RACE, IDC_PIPE_BTN_READ, IDC_PIPE_BTN_BUY,
+        IDC_PIPE_BTN_SPIN, IDC_PIPE_BTN_REMOVE, IDC_PIPE_BTN_LOOP,
+        IDC_PIPE_CHK_RACE, IDC_PIPE_CHK_BUY, IDC_PIPE_CHK_SPIN,
+        IDC_PIPE_CHK_REMOVE, IDC_PIPE_CHK_AUTO,
+        IDC_PIPE_COMBO_CAR, IDC_COMBO_PROFILE,
+        IDC_PIPE_EDIT_TARGET_SP, IDC_PIPE_EDIT_CYCLES, IDC_PIPE_EDIT_COUNT
+    };
+    for (size_t i = 0; i < sizeof(controls) / sizeof(controls[0]); i++) {
+        HWND control = GetDlgItem(page, controls[i]);
+        if (control) EnableWindow(control, available && !s_gui.pipeline_running);
+    }
+    if (s_gui.hwnd_btn_race_start)
+        EnableWindow(s_gui.hwnd_btn_race_start,
+                     available && !s_gui.pipeline_running);
+    if (!available && reason)
+        Gui_SetPipelineEcon(-1, -1, -1, reason, L"");
 }
 
 /* ─── Window Procedure ────────────────────────────────────────────── */

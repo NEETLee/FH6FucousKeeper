@@ -18,6 +18,7 @@
 typedef BOOL    (*PFN_Hook_Install)(HWND);
 typedef void    (*PFN_Hook_Uninstall)(void);
 typedef BOOL    (*PFN_Hook_IsActive)(void);
+typedef BOOL    (*PFN_Hook_IsSubclassed)(void);
 typedef void    (*PFN_Hook_GetStats)(HookStats*);
 typedef void    (*PFN_Hook_ResetStats)(void);
 typedef HWND    (*PFN_Hook_GetTarget)(void);
@@ -34,6 +35,7 @@ static struct {
     PFN_Hook_Install    pfnInstall;
     PFN_Hook_Uninstall  pfnUninstall;
     PFN_Hook_IsActive   pfnIsActive;
+    PFN_Hook_IsSubclassed pfnIsSubclassed;
     PFN_Hook_GetStats   pfnGetStats;
     PFN_Hook_ResetStats pfnResetStats;
     PFN_Hook_GetTarget  pfnGetTarget;
@@ -71,11 +73,14 @@ static BOOL ResolveFunctions(void)
     s_mgr.pfnInstall    = (PFN_Hook_Install)GetProcAddress(s_mgr.dll_handle, "Hook_Install");
     s_mgr.pfnUninstall  = (PFN_Hook_Uninstall)GetProcAddress(s_mgr.dll_handle, "Hook_Uninstall");
     s_mgr.pfnIsActive   = (PFN_Hook_IsActive)GetProcAddress(s_mgr.dll_handle, "Hook_IsActive");
+    s_mgr.pfnIsSubclassed = (PFN_Hook_IsSubclassed)GetProcAddress(
+        s_mgr.dll_handle, "Hook_IsSubclassed");
     s_mgr.pfnGetStats   = (PFN_Hook_GetStats)GetProcAddress(s_mgr.dll_handle, "Hook_GetStats");
     s_mgr.pfnResetStats = (PFN_Hook_ResetStats)GetProcAddress(s_mgr.dll_handle, "Hook_ResetStats");
     s_mgr.pfnGetTarget  = (PFN_Hook_GetTarget)GetProcAddress(s_mgr.dll_handle, "Hook_GetTarget");
 
     if (!s_mgr.pfnInstall || !s_mgr.pfnUninstall || !s_mgr.pfnIsActive ||
+        !s_mgr.pfnIsSubclassed ||
         !s_mgr.pfnGetStats || !s_mgr.pfnResetStats || !s_mgr.pfnGetTarget) {
         SetError(L"hook.dll 导出函数解析失败");
         return FALSE;
@@ -155,6 +160,25 @@ BOOL HookMgr_Attach(HWND target_hwnd)
     if (!s_mgr.pfnInstall(target_hwnd)) {
         DWORD err = GetLastError();
         SetError(L"Hook 安装失败 (错误码: %lu)。请确认以管理员身份运行。", err);
+        return FALSE;
+    }
+
+    /* SetWindowsHookEx only confirms registration. Wait until the DLL running
+     * in the target process confirms that it actually subclassed this HWND. */
+    BOOL confirmed = FALSE;
+    for (int i = 0; i < 30; i++) {
+        if (s_mgr.pfnIsSubclassed()) {
+            confirmed = TRUE;
+            break;
+        }
+        DWORD_PTR ignored = 0;
+        SendMessageTimeoutW(target_hwnd, WM_NULL, 0, 0,
+                            SMTO_ABORTIFHUNG | SMTO_BLOCK, 100, &ignored);
+        Sleep(50);
+    }
+    if (!confirmed) {
+        s_mgr.pfnUninstall();
+        SetError(L"Hook 已注册但目标窗口未确认安装。目标可能受保护、位数不兼容或无响应。");
         return FALSE;
     }
 

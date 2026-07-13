@@ -47,6 +47,80 @@ static BOOL IsTargetProcess(const WCHAR *process_name)
             _wcsicmp(process_name, FH6_STORE_PROCESS) == 0);
 }
 
+typedef struct {
+    BOOL rendering;
+    BOOL core_window;
+    HWND fh6_hwnd;
+} Fh6ChildProbe;
+
+static BOOL CALLBACK ProbeFh6Child(HWND hwnd, LPARAM lParam)
+{
+    Fh6ChildProbe *probe = (Fh6ChildProbe *)lParam;
+    WCHAR cls[256] = {0};
+    GetClassNameW(hwnd, cls, 256);
+    BOOL candidate = FALSE;
+    if (_wcsicmp(cls, L"ForzaRenderingWindow") == 0) {
+        probe->rendering = TRUE;
+        candidate = TRUE;
+    }
+    if (_wcsicmp(cls, FH6_STORE_CLASS) == 0) {
+        probe->core_window = TRUE;
+        candidate = TRUE;
+    }
+    if (candidate) {
+        DWORD pid = 0;
+        WCHAR process[MAX_PATH] = {0};
+        GetWindowThreadProcessId(hwnd, &pid);
+        if (_wcsicmp(cls, FH6_STORE_CLASS) == 0 &&
+            pid && WinFinder_GetProcessName(pid, process, MAX_PATH) &&
+            IsTargetProcess(process)) {
+            probe->fh6_hwnd = hwnd;
+            return FALSE;
+        }
+    }
+    return TRUE;
+}
+
+HWND WinFinder_ResolveTargetWindow(HWND hwnd)
+{
+    if (!hwnd || !IsWindow(hwnd)) return NULL;
+    WCHAR cls[256] = {0};
+    GetClassNameW(hwnd, cls, 256);
+    if (_wcsicmp(cls, UWP_FRAME_CLASS) != 0)
+        return hwnd;
+    Fh6ChildProbe probe = {0};
+    EnumChildWindows(hwnd, ProbeFh6Child, (LPARAM)&probe);
+    return probe.fh6_hwnd ? probe.fh6_hwnd : hwnd;
+}
+
+BOOL WinFinder_IsFH6Window(HWND hwnd)
+{
+    if (!hwnd || !IsWindow(hwnd)) return FALSE;
+    DWORD pid = 0;
+    WCHAR process[MAX_PATH] = {0};
+    WCHAR cls[256] = {0};
+    GetWindowThreadProcessId(hwnd, &pid);
+    GetClassNameW(hwnd, cls, 256);
+    if (!pid || !WinFinder_GetProcessName(pid, process, MAX_PATH))
+        return FALSE;
+
+    Fh6ChildProbe probe = {0};
+    EnumChildWindows(hwnd, ProbeFh6Child, (LPARAM)&probe);
+    if (probe.fh6_hwnd)
+        return TRUE;
+
+    /* The executable identity is mandatory. Titles alone are user-controlled
+     * and must never unlock automation for an unrelated process. */
+    if (!IsTargetProcess(process)) return FALSE;
+
+    if (_wcsicmp(cls, FH6_STEAM_CLASS) == 0 ||
+        _wcsicmp(cls, FH6_STORE_CLASS) == 0 ||
+        _wcsicmp(cls, UWP_FRAME_CLASS) == 0)
+        return TRUE;
+
+    return probe.rendering || probe.core_window;
+}
+
 static void FillWindowInfo(WindowInfo *info, HWND hwnd)
 {
     info->hwnd = hwnd;
@@ -56,6 +130,7 @@ static void FillWindowInfo(WindowInfo *info, HWND hwnd)
     GetWindowTextW(hwnd, info->title, 256);
     GetClassNameW(hwnd, info->class_name, 256);
     WinFinder_GetProcessName(info->pid, info->process_name, MAX_PATH);
+    info->is_fh6 = WinFinder_IsFH6Window(hwnd);
 
     /* Detect version based on window class */
     if (_wcsicmp(info->class_name, UWP_FRAME_CLASS) == 0 ||
@@ -176,13 +251,22 @@ static BOOL CALLBACK EnumAllProc(HWND hwnd, LPARAM lParam)
     WCHAR title[256] = {0};
 
     if (!IsWindowVisible(hwnd)) return TRUE;
+    if (hwnd == GetShellWindow() || hwnd == GetDesktopWindow()) return TRUE;
+
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    if (pid == GetCurrentProcessId()) return TRUE;
 
     GetWindowTextW(hwnd, title, 256);
     if (title[0] == L'\0') return TRUE;  /* Skip untitled windows */
 
-    /* Skip tiny/tool windows */
-    LONG style = GetWindowLong(hwnd, GWL_STYLE);
-    if (style & WS_POPUP && !(style & WS_CAPTION)) return TRUE;
+    /* Keep borderless game windows, but skip tool palettes and tiny helpers. */
+    LONG ex_style = GetWindowLong(hwnd, GWL_EXSTYLE);
+    if (ex_style & WS_EX_TOOLWINDOW) return TRUE;
+    RECT rc = {0};
+    if (!GetWindowRect(hwnd, &rc) ||
+        rc.right - rc.left < 64 || rc.bottom - rc.top < 64)
+        return TRUE;
 
     if (result->count < MAX_CANDIDATES) {
         FillWindowInfo(&result->candidates[result->count], hwnd);

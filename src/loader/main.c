@@ -64,6 +64,8 @@ static struct {
     HWND            game_hwnd;
     DWORD           game_pid;
     GameVersion     detected_version;
+    TargetKind      target_kind;
+    TargetSource    target_source;
     WCHAR           game_title[256];
     BOOL            hook_active;
     BOOL            game_muted;
@@ -85,6 +87,8 @@ static void UpdateStatsDisplay(void);
 static void DoToggleAutoRace(void);
 static void DoStartAutoRace(void);
 static void DoStopAutoRace(void);
+static BOOL TargetCanUseFarm(void);
+static void UpdateTargetCapabilities(void);
 
 /* Race controller instance */
 static RaceController s_race_ctrl = {0};
@@ -298,6 +302,12 @@ static DWORD WINAPI PipeThreadProc(LPVOID arg) {
 }
 
 static void StartPipelineJob(BOOL full_loop, PipelineStep step, int count) {
+    if (!TargetCanUseFarm()) {
+        LOG_W(L"Automation rejected: selected target is not a verified FH6 window");
+        Gui_SetPipelineEcon(-1, -1, -1,
+            I18n_Get(STR_PIPE_FH6_ONLY), L"");
+        return;
+    }
     if (s_pipeline && Pipeline_IsRunning(s_pipeline)) {
         LOG_W(L"Pipeline already running");
         return;
@@ -496,7 +506,11 @@ static void DebugPollCommand(HWND hwnd) {
     sscanf(line, "%31s %d", verb, &arg);
 
     const char *result = "ok";
-    if      (strcmp(verb,"race")==0)   StartPipelineJob(FALSE, PIPE_STEP_RACE, 0);
+    BOOL farm_command = strcmp(verb,"race")==0 || strcmp(verb,"read")==0 ||
+                        strcmp(verb,"buy")==0 || strcmp(verb,"spin")==0 ||
+                        strcmp(verb,"remove")==0 || strcmp(verb,"loop")==0;
+    if (farm_command && !TargetCanUseFarm()) result="rejected_non_fh6";
+    else if (strcmp(verb,"race")==0)   StartPipelineJob(FALSE, PIPE_STEP_RACE, 0);
     else if (strcmp(verb,"read")==0)   StartPipelineJob(FALSE, PIPE_STEP_READ_ECON, 0);
     else if (strcmp(verb,"buy")==0)    StartPipelineJob(FALSE, PIPE_STEP_BUY,    arg>0?arg:PipeManualCount());
     else if (strcmp(verb,"spin")==0)   StartPipelineJob(FALSE, PIPE_STEP_SPIN,   arg>0?arg:PipeManualCount());
@@ -514,11 +528,13 @@ static void DebugPollCommand(HWND hwnd) {
             FILE *s = fopen(s_debug_status, "wb");
             if (s) {
                 fprintf(s, "running=%d\nbought=%d\nspins=%d\nremoved=%d\nraces=%d\n"
-                           "balance=%d\nsp=%d\ncomputed=%d\nstage=%s\n",
+                           "balance=%d\nsp=%d\ncomputed=%d\nstage=%s\n"
+                           "target_kind=%d\ntarget_source=%d\n",
                         running, st.total_bought, st.total_wheelspins,
                         st.total_removed, st.total_races, st.last_balance,
                         st.last_skill_points, st.last_computed_count,
-                        st.current_step ? st.current_step : "-");
+                        st.current_step ? st.current_step : "-",
+                        (int)s_app.target_kind, (int)s_app.target_source);
                 fclose(s);
             }
         }
@@ -630,7 +646,8 @@ static LRESULT CALLBACK AppWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
             UpdatePipelineDisplay();
 #endif
         } else if (wParam == IDT_AUTO_FIND) {
-            if (!s_app.hook_active && s_app.game_hwnd == NULL) {
+            if (!s_app.hook_active && s_app.game_hwnd == NULL &&
+                s_app.target_source != TARGET_SOURCE_MANUAL) {
                 DoFindGame();
             }
         }
@@ -742,6 +759,72 @@ static void OnHookStateChanged(HookManagerState state, const WCHAR *message)
 
 /* ─── Action Handlers ─────────────────────────────────────────────── */
 
+static BOOL TargetCanUseFarm(void)
+{
+    return s_app.target_kind == TARGET_KIND_FH6 &&
+           s_app.game_hwnd && IsWindow(s_app.game_hwnd) &&
+           WinFinder_IsFH6Window(s_app.game_hwnd);
+}
+
+static void UpdateTargetCapabilities(void)
+{
+#ifdef USE_FARM
+    if (TargetCanUseFarm())
+        Gui_SetFarmAvailable(TRUE, NULL);
+    else
+        Gui_SetFarmAvailable(FALSE, I18n_Get(STR_PIPE_FH6_ONLY));
+#endif
+}
+
+static BOOL ReleaseTargetRuntime(void)
+{
+#ifdef USE_FARM
+    DoPipelineStop();
+    if (s_pipe_thread) {
+        if (WaitForSingleObject(s_pipe_thread, 8000) != WAIT_OBJECT_0) {
+            LOG_E(L"Cannot switch target while automation worker is still stopping");
+            return FALSE;
+        }
+        CloseHandle(s_pipe_thread);
+        s_pipe_thread = NULL;
+        Gui_SetPipelineRunning(FALSE);
+    }
+    if (ScreenCapture_IsActive())
+        ScreenCapture_StopCapture();
+#endif
+    DoStopAutoRace();
+    if (s_app.hook_active)
+        DoDisableHook();
+    if (s_app.game_muted && s_app.game_pid) {
+        AudioCtrl_MuteProcess(s_app.game_pid, FALSE);
+        s_app.game_muted = FALSE;
+    }
+    return TRUE;
+}
+
+static BOOL ApplyTarget(const WindowInfo *info, TargetSource source)
+{
+    if (!info || !IsWindow(info->hwnd)) return FALSE;
+    if (s_app.game_hwnd && s_app.game_hwnd != info->hwnd &&
+        !ReleaseTargetRuntime())
+        return FALSE;
+
+    s_app.game_hwnd = info->hwnd;
+    s_app.game_pid = info->pid;
+    s_app.detected_version = info->detected_version;
+    s_app.target_kind = WinFinder_IsFH6Window(info->hwnd)
+                      ? TARGET_KIND_FH6 : TARGET_KIND_GENERIC;
+    s_app.target_source = source;
+    wcsncpy(s_app.game_title, info->title, 255);
+    s_app.game_title[255] = L'\0';
+
+    Gui_UpdateStatus(s_app.hook_active, s_app.game_title,
+        NULL, s_app.game_hwnd, s_app.game_pid);
+    Gui_UpdateButtons(s_app.hook_active, s_app.game_muted);
+    UpdateTargetCapabilities();
+    return TRUE;
+}
+
 static void DoFindGame(void)
 {
     FindResult result;
@@ -751,24 +834,25 @@ static void DoFindGame(void)
     if (WinFinder_Find(s_app.settings.game_version, &result)) {
         if (result.best_match >= 0) {
             const WindowInfo *best = &result.candidates[result.best_match];
-            s_app.game_hwnd = best->hwnd;
-            s_app.game_pid = best->pid;
-            s_app.detected_version = best->detected_version;
-            wcsncpy(s_app.game_title, best->title, 255);
+            if (!ApplyTarget(best, TARGET_SOURCE_AUTO))
+                return;
 
             LOG_I(L"%s: %s (PID: %lu, HWND: 0x%08X)",
                 I18n_Get(STR_LOG_GAME_FOUND),
                 best->title, best->pid, (unsigned)(UINT_PTR)best->hwnd);
 
-            Gui_UpdateStatus(s_app.hook_active, s_app.game_title,
-                NULL, s_app.game_hwnd, s_app.game_pid);
         }
     } else {
         LOG_W(L"%s", I18n_Get(STR_LOG_GAME_NOT_FOUND));
-        s_app.game_hwnd = NULL;
-        s_app.game_pid = 0;
-        s_app.game_title[0] = L'\0';
-        Gui_UpdateStatus(FALSE, NULL, NULL, NULL, 0);
+        if (s_app.target_source != TARGET_SOURCE_MANUAL) {
+            s_app.game_hwnd = NULL;
+            s_app.game_pid = 0;
+            s_app.game_title[0] = L'\0';
+            s_app.target_kind = TARGET_KIND_NONE;
+            s_app.target_source = TARGET_SOURCE_NONE;
+            Gui_UpdateStatus(FALSE, NULL, NULL, NULL, 0);
+            UpdateTargetCapabilities();
+        }
     }
 }
 
@@ -780,6 +864,10 @@ static void DoEnableHook(void)
     }
 
     if (!s_app.game_hwnd) {
+        if (s_app.target_source == TARGET_SOURCE_MANUAL) {
+            LOG_E(L"Cannot enable: manually selected target is no longer available");
+            return;
+        }
         DoFindGame();
         if (!s_app.game_hwnd) {
             LOG_E(L"Cannot enable: %s", I18n_Get(STR_LOG_GAME_NOT_FOUND));
@@ -791,19 +879,23 @@ static void DoEnableHook(void)
     if (!IsWindow(s_app.game_hwnd)) {
         LOG_W(L"%s, re-searching...", I18n_Get(STR_LOG_WINDOW_CLOSED));
         s_app.game_hwnd = NULL;
+        if (s_app.target_source == TARGET_SOURCE_MANUAL) {
+            LOG_E(L"Cannot enable: manually selected target was closed");
+            UpdateTargetCapabilities();
+            return;
+        }
         DoFindGame();
         if (!s_app.game_hwnd) return;
     }
 
-    /* Try DLL Hook first (works for both Steam and Store versions) */
-    if (HookMgr_GetState() != HOOK_STATE_ERROR) {
-        LOG_I(L"Installing DLL Hook...");
-        if (HookMgr_Attach(s_app.game_hwnd)) {
-            LOG_I(L"%s", I18n_Get(STR_LOG_HOOK_INSTALLED));
-            return;
-        }
-        LOG_E(L"DLL Hook failed: %s", HookMgr_GetLastError());
+    /* Try DLL Hook. A previous target-specific failure must not permanently
+     * block retries after the user selects another window. */
+    LOG_I(L"Installing DLL Hook...");
+    if (HookMgr_Attach(s_app.game_hwnd)) {
+        LOG_I(L"%s", I18n_Get(STR_LOG_HOOK_INSTALLED));
+        return;
     }
+    LOG_E(L"DLL Hook failed: %s", HookMgr_GetLastError());
 
     LOG_E(L"%s", I18n_Get(STR_LOG_HOOK_FAILED));
 }
@@ -844,6 +936,10 @@ static void DoToggleHook(void)
 static void DoMuteToggle(void)
 {
     if (!s_app.game_pid) {
+        if (s_app.target_source == TARGET_SOURCE_MANUAL) {
+            LOG_W(L"Cannot mute: manually selected target is no longer available");
+            return;
+        }
         DoFindGame();
         if (!s_app.game_pid) {
             LOG_W(L"Cannot mute: game not found");
@@ -874,8 +970,36 @@ static void DoRefreshWindowList(void)
 
 static void DoSelectWindow(int index)
 {
-    (void)index;
-    LOG_W(L"Please select a window from the list");
+    if (index < 0)
+        index = Gui_GetSelectedWindowIndex();
+    if (index < 0 || index >= s_app.last_find_result.count) {
+        LOG_W(L"Please select a window from the list");
+        return;
+    }
+    const WindowInfo *selected = &s_app.last_find_result.candidates[index];
+    if (!IsWindow(selected->hwnd)) {
+        LOG_W(L"Selected window is no longer available; refresh the list");
+        return;
+    }
+
+    WindowInfo resolved = *selected;
+    HWND target_hwnd = WinFinder_ResolveTargetWindow(selected->hwnd);
+    if (target_hwnd && target_hwnd != selected->hwnd) {
+        resolved.hwnd = target_hwnd;
+        resolved.tid = GetWindowThreadProcessId(target_hwnd, &resolved.pid);
+        GetClassNameW(target_hwnd, resolved.class_name, 256);
+        WinFinder_GetProcessName(resolved.pid, resolved.process_name, MAX_PATH);
+        resolved.detected_version = GAME_VERSION_STORE;
+        resolved.is_fh6 = TRUE;
+    }
+
+    if (!ApplyTarget(&resolved, TARGET_SOURCE_MANUAL))
+        return;
+    LOG_I(L"Manual target selected: %s (%s, PID: %lu, HWND: 0x%08X)",
+          selected->title,
+          s_app.target_kind == TARGET_KIND_FH6 ? L"FH6 automation enabled"
+                                               : L"generic anti-pause only",
+          resolved.pid, (unsigned)(UINT_PTR)resolved.hwnd);
 }
 
 static void DoSaveSettings(void)
@@ -885,6 +1009,7 @@ static void DoSaveSettings(void)
     /* Apply language change at runtime */
     I18n_SetLanguage((Language)s_app.settings.language);
     Gui_RefreshLanguage(s_app.hook_active, s_app.game_muted);
+    UpdateTargetCapabilities();
 
     /* Apply prevent_sleep change immediately if hook is active */
     if (s_app.hook_active) {
@@ -904,6 +1029,16 @@ static void DoSaveSettings(void)
 
 static void DoStartAutoRace(void)
 {
+    if (!TargetCanUseFarm()) {
+        LOG_W(L"Auto race rejected: selected target is not a verified FH6 window");
+        return;
+    }
+#ifdef USE_FARM
+    if (s_pipeline && Pipeline_IsRunning(s_pipeline)) {
+        LOG_W(L"Auto race rejected: farm pipeline is already running");
+        return;
+    }
+#endif
     if (!s_app.hook_active) {
         /* Auto-enable anti-pause if not active */
         DoEnableHook();
@@ -977,11 +1112,15 @@ static void UpdateStatsDisplay(void)
     /* Also check if the game window is still alive */
     if (s_app.game_hwnd && !IsWindow(s_app.game_hwnd)) {
         LOG_W(L"%s", I18n_Get(STR_LOG_WINDOW_CLOSED));
-        DoDisableHook();
+        ReleaseTargetRuntime();
         s_app.game_hwnd = NULL;
         s_app.game_pid = 0;
         s_app.game_title[0] = L'\0';
+        s_app.target_kind = TARGET_KIND_NONE;
+        /* Preserve MANUAL source so auto-find cannot silently replace a closed
+         * manually selected generic target. */
         Gui_UpdateStatus(FALSE, NULL, NULL, NULL, 0);
+        UpdateTargetCapabilities();
     }
 }
 
@@ -1054,6 +1193,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         MessageBoxW(NULL, L"GUI creation failed", L"Error", MB_ICONERROR);
         goto cleanup;
     }
+    UpdateTargetCapabilities();
 
     /* Subclass main window to handle our commands */
     s_orig_main_proc = (WNDPROC)SetWindowLongPtr(hwnd_main, GWLP_WNDPROC, (LONG_PTR)AppWndProc);
