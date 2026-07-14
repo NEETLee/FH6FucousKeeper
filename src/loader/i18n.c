@@ -150,6 +150,8 @@ static const WCHAR *s_strings_zh[STR_COUNT] = {
     /* STR_PIPE_NOTES_RACE_TITLE */ L"\u8d5b\u4e8b\u914d\u7f6e\u8bf4\u660e",
     /* STR_PIPE_NOTES_EMPTY */  L"\u5f53\u524d\u914d\u7f6e\u6ca1\u6709\u8bf4\u660e\u6ce8\u91ca\u3002",
     /* STR_PIPE_NOTES_OK */     L"\u786e\u5b9a",
+    /* STR_EDITION_FULL */      L"Full",
+    /* STR_EDITION_LITE */      L"Lite",
 };
 
 /* ─── English String Table ────────────────────────────────────────── */
@@ -293,6 +295,8 @@ static const WCHAR *s_strings_en[STR_COUNT] = {
     /* STR_PIPE_NOTES_RACE_TITLE */ L"Race Profile Notes",
     /* STR_PIPE_NOTES_EMPTY */  L"This profile has no comment notes.",
     /* STR_PIPE_NOTES_OK */     L"OK",
+    /* STR_EDITION_FULL */      L"Full",
+    /* STR_EDITION_LITE */      L"Lite",
 };
 
 /* ─── Traditional Chinese String Table ────────────────────────────── */
@@ -436,6 +440,8 @@ static const WCHAR *s_strings_zh_tw[STR_COUNT] = {
     /* STR_PIPE_NOTES_RACE_TITLE */ L"\u8cfd\u4e8b\u8a2d\u5b9a\u8aaa\u660e",
     /* STR_PIPE_NOTES_EMPTY */  L"\u7576\u524d\u8a2d\u5b9a\u6c92\u6709\u8aaa\u660e\u8a3b\u89e3\u3002",
     /* STR_PIPE_NOTES_OK */     L"\u78ba\u5b9a",
+    /* STR_EDITION_FULL */      L"Full",
+    /* STR_EDITION_LITE */      L"Lite",
 };
 
 /* ─── Public API ──────────────────────────────────────────────────── */

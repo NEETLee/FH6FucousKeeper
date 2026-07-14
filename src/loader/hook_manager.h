@@ -24,10 +24,10 @@ typedef void (*HookStateCallback)(HookManagerState new_state, const WCHAR *messa
 
 /* ─── Public API ──────────────────────────────────────────────────── */
 
-/* Initialize the hook manager, load hook.dll */
+/* Initialize: extract embedded hook.dll to %TEMP% and LoadLibrary it */
 BOOL    HookMgr_Init(void);
 
-/* Cleanup and release resources */
+/* Detach hook, unload DLL, and delete the extracted temp file */
 void    HookMgr_Shutdown(void);
 
 /* Install hook on target window */

@@ -10,6 +10,9 @@ IDI_APP_ICON ICON "app.ico"
 /* Application Manifest (embedded) */
 CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "app.manifest"
 
+/* hook.dll payload — built first, then embedded; extracted to %TEMP% at runtime */
+IDR_HOOK_DLL RCDATA "../build/hook.dll"
+
 /* Version Information */
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION     1,0,0,0

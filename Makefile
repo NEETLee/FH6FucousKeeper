@@ -41,7 +41,8 @@ endif
 
 # Linker flags
 LDFLAGS_DLL = -shared -Wl,--out-implib,build/libhook.a
-LDFLAGS_EXE = -mwindows -L./build -lhook -lcomctl32 -lpsapi -lole32 -loleaut32 -lgdi32 -lwinhttp
+# No -lhook: hook.dll is embedded as RCDATA and LoadLibrary'd from %TEMP% at runtime.
+LDFLAGS_EXE = -mwindows -lcomctl32 -lpsapi -lole32 -loleaut32 -lgdi32 -lwinhttp
 LDFLAGS_WGC = $(LDFLAGS_EXE) -ld3d11 -ldxgi -lwindowsapp -lruntimeobject
 
 # Directories
@@ -50,11 +51,14 @@ SRC_LOADER = src/loader
 RES_DIR = res
 BUILD_DIR = build
 DIST_DIR = dist
+DIST_LITE_DIR = dist-lite
 
 # Source files
 HOOK_SRC = $(SRC_HOOK)/hook.c
 HOOK_DEF = $(SRC_HOOK)/hook.def
-LOADER_SRC = $(SRC_LOADER)/main.c \
+
+# Core sources: anti-pause + mute + window/tray/settings (no capture, no farm).
+CORE_C_SRC = $(SRC_LOADER)/main.c \
              $(SRC_LOADER)/gui.c \
              $(SRC_LOADER)/tray.c \
              $(SRC_LOADER)/hook_manager.c \
@@ -63,14 +67,19 @@ LOADER_SRC = $(SRC_LOADER)/main.c \
              $(SRC_LOADER)/settings.c \
              $(SRC_LOADER)/audio_control.c \
              $(SRC_LOADER)/i18n.c \
-             $(SRC_LOADER)/input_hook_backend.c \
-             $(SRC_LOADER)/step_executor.c \
-             $(SRC_LOADER)/race_profile.c \
-             $(SRC_LOADER)/auto_race.c \
-             $(SRC_LOADER)/race_controller.c \
-             $(SRC_LOADER)/screen_detect.c \
-             $(SRC_LOADER)/screen_capture_gdi.c \
              $(SRC_LOADER)/version_check.c
+
+# Automation sources: timed-script race engine (linked only into farm/full builds).
+AUTOMATION_C_SRC = $(SRC_LOADER)/input_hook_backend.c \
+                   $(SRC_LOADER)/step_executor.c \
+                   $(SRC_LOADER)/race_profile.c \
+                   $(SRC_LOADER)/auto_race.c \
+                   $(SRC_LOADER)/race_controller.c \
+                   $(SRC_LOADER)/screen_detect.c
+
+# Default (non-farm) loader set: core + automation + GDI capture helper.
+LOADER_SRC = $(CORE_C_SRC) $(AUTOMATION_C_SRC) \
+             $(SRC_LOADER)/screen_capture_gdi.c
 
 # C++ source files (WinRT modules - used with USE_WGC=1)
 LOADER_CXX_SRC = $(SRC_LOADER)/screen_capture.cpp \
@@ -87,7 +96,7 @@ RES_OBJ = $(BUILD_DIR)/app_res.o
 
 # ─── Targets ──────────────────────────────────────────────────────────
 
-.PHONY: all clean rebuild dll exe dirs farm farm-release farm-replay test-generic-hook capture-frame
+.PHONY: all clean rebuild dll exe dirs farm farm-release lite lite-release release-all farm-replay test-generic-hook capture-frame
 
 all: dirs dll exe profiles
 
@@ -105,7 +114,8 @@ exe: dirs $(EXE_OUT)
 $(DLL_OUT): $(HOOK_SRC) $(HOOK_DEF)
 	$(CC) $(CFLAGS) -DHOOK_EXPORTS $(LDFLAGS_DLL) -o $@ $(HOOK_SRC) $(HOOK_DEF) -luser32
 
-$(RES_OBJ): $(RES_DIR)/app.rc $(RES_DIR)/resource.h $(RES_DIR)/app.manifest
+# Resource object embeds build/hook.dll as RCDATA — rebuild whenever the DLL changes.
+$(RES_OBJ): $(RES_DIR)/app.rc $(RES_DIR)/resource.h $(RES_DIR)/app.manifest $(DLL_OUT)
 	$(WINDRES) -c 65001 -I$(RES_DIR) $(RES_DIR)/app.rc -o $@
 
 # Compile C++ WinRT modules (only when USE_WGC=1)
@@ -134,7 +144,7 @@ FARM_CXX_OBJS = $(BUILD_DIR)/template_match.o \
                 $(BUILD_DIR)/screen_capture_wgc.o \
                 $(BUILD_DIR)/ocr_engine_wrt.o \
                 $(BUILD_DIR)/xbox_textentry.o
-FARM_C_SRC = $(filter-out %/screen_capture_gdi.c,$(LOADER_SRC)) \
+FARM_C_SRC = $(CORE_C_SRC) $(AUTOMATION_C_SRC) \
              $(SRC_LOADER)/game_input.c \
              $(SRC_LOADER)/farm_flow.c \
              $(SRC_LOADER)/farm_pipeline.c \
@@ -185,7 +195,7 @@ farm: dirs dll $(FARM_CXX_OBJS) $(RES_OBJ) profiles farm-assets car-profiles
 	$(call bundle_dlls,$(BUILD_DIR))
 	@echo "[OK] Built $(EXE_OUT) (DEBUG farm pipeline)"
 
-# Release: assemble a clean dist/ with ONLY what ships (exe + hook.dll + runtime
+# Release: assemble a clean dist/ (exe with embedded hook.dll + OpenCV runtime
 # DLLs + assets + profiles). dist/ is wiped first so it always reflects the build.
 farm-release: CFLAGS += -DUSE_WGC_CAPTURE -DUSE_FARM
 farm-release: dirs dll $(FARM_CXX_OBJS) $(RES_OBJ)
@@ -195,7 +205,6 @@ farm-release: dirs dll $(FARM_CXX_OBJS) $(RES_OBJ)
 		$(FARM_C_SRC) \
 		$(FARM_CXX_OBJS) $(RES_OBJ) \
 		$(LDFLAGS_WGC) $(OPENCV_LIBS) -luuid -lstdc++
-	@cp -f $(DLL_OUT) $(DIST_DIR)/
 	$(call bundle_dlls,$(DIST_DIR))
 	@mkdir -p $(DIST_DIR)/assets/templates
 	@cp -f assets/templates/* $(DIST_DIR)/assets/templates/ 2>/dev/null || true
@@ -204,7 +213,28 @@ farm-release: dirs dll $(FARM_CXX_OBJS) $(RES_OBJ)
 	@mkdir -p $(DIST_DIR)/profiles/cars
 	@cp -rf data/profiles/cars/* $(DIST_DIR)/profiles/cars/ 2>/dev/null || true
 	@bash scripts/upx_compress.sh $(DIST_DIR)
-	@echo "[OK] Release package -> $(DIST_DIR)/ (RELEASE farm pipeline, no debug code)"
+	@echo "[OK] Release package -> $(DIST_DIR)/ (RELEASE full / farm pipeline, hook.dll embedded)"
+
+# ─── Lite build: anti-pause + mute only (no USE_FARM, no capture/OpenCV) ──
+# `make lite`         -> DEBUG-friendly build into build/ (no FK_DEBUG farm extras).
+# `make lite-release` -> shippable package into dist-lite/ (single exe; hook embedded).
+# `make release-all`  -> farm-release + lite-release for dual GitHub Release artifacts.
+
+lite: dirs dll $(RES_OBJ)
+	$(CC) $(CFLAGS) -o $(EXE_OUT) \
+		$(CORE_C_SRC) $(RES_OBJ) $(LDFLAGS_EXE)
+	@echo "[OK] Built $(EXE_OUT) (LITE / anti-pause only, hook.dll embedded)"
+
+lite-release: dirs dll $(RES_OBJ)
+	@rm -rf $(DIST_LITE_DIR)
+	@mkdir -p $(DIST_LITE_DIR)
+	$(CC) $(CFLAGS) -o $(DIST_LITE_DIR)/FocusKeeper.exe \
+		$(CORE_C_SRC) $(RES_OBJ) $(LDFLAGS_EXE)
+	@bash scripts/upx_compress.sh $(DIST_LITE_DIR)
+	@echo "[OK] Release package -> $(DIST_LITE_DIR)/ (LITE single exe, hook.dll embedded)"
+
+release-all: farm-release lite-release
+	@echo "[OK] Dual release packages: $(DIST_DIR)/ + $(DIST_LITE_DIR)/"
 
 # Offline replay tool: run the vision detectors on a saved PNG frame, no game
 # needed. Build: make farm-replay ; Run: build/farm_replay.exe frame.png [lang]
@@ -236,7 +266,7 @@ capture-frame: dirs $(BUILD_DIR)/screen_capture_wgc.o
 	@echo "Run: $(BUILD_DIR)/capture_frame.exe <out.png>"
 
 clean:
-	@rm -rf $(BUILD_DIR) $(DIST_DIR)
+	@rm -rf $(BUILD_DIR) $(DIST_DIR) $(DIST_LITE_DIR)
 
 rebuild: clean all
 

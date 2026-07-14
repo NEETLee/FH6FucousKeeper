@@ -18,6 +18,13 @@
 #include <wchar.h>
 #include <shellapi.h>
 
+/* ─── Build edition (full = auto-race/farm enabled, lite = anti-pause only) ─ */
+#ifdef USE_FARM
+#define FK_EDITION_ID   STR_EDITION_FULL
+#else
+#define FK_EDITION_ID   STR_EDITION_LITE
+#endif
+
 /* ─── Constants ───────────────────────────────────────────────────── */
 #define BASE_WIDTH      520
 #define BASE_HEIGHT     420
@@ -64,9 +71,6 @@ static struct {
 
     /* Auto Race page */
     HWND        hwnd_combo_profile;
-    HWND        hwnd_btn_race_start;
-    HWND        hwnd_btn_race_stop;
-    HWND        hwnd_lbl_race_info;
     HWND        hwnd_edit_profile_desc;
 
     /* Modeless profile-notes window (at most one) */
@@ -89,7 +93,9 @@ static void CreateStatusPage(HWND parent);
 static void CreateWindowListPage(HWND parent);
 static void CreateLogPage(HWND parent);
 static void CreateSettingsPage(HWND parent);
+#ifdef USE_FARM
 static void CreateAutoRacePage(HWND parent);
+#endif
 static void SwitchPage(int index);
 static void LayoutPages(void);
 static BOOL RegisterPanelClass(HINSTANCE hInstance);
@@ -291,7 +297,9 @@ HWND Gui_Create(const GuiContext *ctx)
     CreateWindowListPage(s_gui.hwnd_main);
     CreateLogPage(s_gui.hwnd_main);
     CreateSettingsPage(s_gui.hwnd_main);
+#ifdef USE_FARM
     CreateAutoRacePage(s_gui.hwnd_main);
+#endif
 
     LayoutPages();
     SwitchPage(0);
@@ -485,13 +493,15 @@ void Gui_RefreshLanguage(BOOL hook_active, BOOL muted)
 
     if (!s_gui.hwnd_main) return;
 
-    /* Window title with version (debug builds get a visible [DEBUG] suffix) */
+    /* Window title with version + edition (debug builds get a [DEBUG] suffix) */
     {
-        WCHAR title[160];
+        WCHAR title[192];
 #ifdef FK_DEBUG
-        wsprintfW(title, L"%s v%s  [DEBUG]", I18n_Get(STR_APP_TITLE), APP_VERSION);
+        wsprintfW(title, L"%s v%s [%s]  [DEBUG]",
+                  I18n_Get(STR_APP_TITLE), APP_VERSION, I18n_Get(FK_EDITION_ID));
 #else
-        wsprintfW(title, L"%s v%s", I18n_Get(STR_APP_TITLE), APP_VERSION);
+        wsprintfW(title, L"%s v%s [%s]",
+                  I18n_Get(STR_APP_TITLE), APP_VERSION, I18n_Get(FK_EDITION_ID));
 #endif
         SetWindowTextW(s_gui.hwnd_main, title);
     }
@@ -507,8 +517,10 @@ void Gui_RefreshLanguage(BOOL hook_active, BOOL muted)
         TabCtrl_SetItem(s_gui.hwnd_tab, 2, &tci);
         tci.pszText = (LPWSTR)I18n_Get(STR_TAB_SETTINGS);
         TabCtrl_SetItem(s_gui.hwnd_tab, 3, &tci);
+#ifdef USE_FARM
         tci.pszText = (LPWSTR)I18n_Get(STR_TAB_AUTO_RACE);
         TabCtrl_SetItem(s_gui.hwnd_tab, 4, &tci);
+#endif
     }
 
     /* Status page */
@@ -573,8 +585,9 @@ void Gui_RefreshLanguage(BOOL hook_active, BOOL muted)
     if (page0) {
         HWND hab = GetDlgItem(page0, IDC_LBL_ABOUT_BRIEF);
         if (hab) {
-            WCHAR about[192];
-            wsprintfW(about, L"%s  |  v%s", I18n_Get(STR_ABOUT_BRIEF), APP_VERSION);
+            WCHAR about[224];
+            wsprintfW(about, L"%s  |  v%s  |  %s",
+                      I18n_Get(STR_ABOUT_BRIEF), APP_VERSION, I18n_Get(FK_EDITION_ID));
             SetWindowTextW(hab, about);
         }
         HWND htip = GetDlgItem(page0, IDC_LBL_TIP);
@@ -650,8 +663,10 @@ static void CreateTabControl(HWND parent)
     tci.pszText = (LPWSTR)I18n_Get(STR_TAB_SETTINGS);
     TabCtrl_InsertItem(s_gui.hwnd_tab, 3, &tci);
 
+#ifdef USE_FARM
     tci.pszText = (LPWSTR)I18n_Get(STR_TAB_AUTO_RACE);
     TabCtrl_InsertItem(s_gui.hwnd_tab, 4, &tci);
+#endif
 }
 
 /* ─── Status Page ─────────────────────────────────────────────────── */
@@ -833,8 +848,9 @@ static void CreateSettingsPage(HWND parent)
     }
 }
 
-/* ─── Auto Race Page ──────────────────────────────────────────────── */
+/* ─── Auto Race Page (full / farm build only) ─────────────────────── */
 
+#ifdef USE_FARM
 /* small helper for a numeric edit with a preceding label */
 static void CreateLabeledEdit(HWND page, const WCHAR *label, const WCHAR *def,
                              int lx, int ex, int y, int lw, int ew, int id) {
@@ -975,6 +991,7 @@ static void CreateAutoRacePage(HWND parent)
             SendMessage(log, WM_SETFONT, (WPARAM)s_gui.hFont, TRUE);
     }
 }
+#endif /* USE_FARM */
 
 /* ─── Page Layout and Switching ───────────────────────────────────── */
 
@@ -1158,34 +1175,8 @@ static void SwitchPage(int index)
 
 /* ─── Auto Race Page Public API ──────────────────────────────────── */
 
-void Gui_UpdateRaceStatus(const WCHAR *status, const WCHAR *step,
-                          int laps, DWORD elapsed_ms)
-{
-    if (!s_gui.hwnd_lbl_race_info) return;
-
-    WCHAR buf[256];
-
-    if (!status || !step) {
-        SetWindowTextW(s_gui.hwnd_lbl_race_info, status ? status : L"");
-        return;
-    }
-
-    DWORD sec = elapsed_ms / 1000;
-    DWORD min = sec / 60;
-    DWORD hr = min / 60;
-
-    _snwprintf(buf, 255, L"%s | %s | \u5708:%d | %02lu:%02lu:%02lu",
-        status, step, laps, hr, min % 60, sec % 60);
-
-    SetWindowTextW(s_gui.hwnd_lbl_race_info, buf);
-}
-
 void Gui_SetRaceRunning(BOOL running)
 {
-    if (s_gui.hwnd_btn_race_start)
-        EnableWindow(s_gui.hwnd_btn_race_start, !running);
-    if (s_gui.hwnd_btn_race_stop)
-        EnableWindow(s_gui.hwnd_btn_race_stop, running);
     if (s_gui.hwnd_combo_profile)
         EnableWindow(s_gui.hwnd_combo_profile, !running);
 }
@@ -1461,9 +1452,6 @@ void Gui_SetPipelineRunning(BOOL running)
     }
     HWND stop = GetDlgItem(page, IDC_PIPE_BTN_STOP);
     if (stop) EnableWindow(stop, running);
-    if (s_gui.hwnd_btn_race_start)
-        EnableWindow(s_gui.hwnd_btn_race_start,
-                     !running && s_gui.farm_available);
 }
 
 void Gui_SetFarmAvailable(BOOL available, const WCHAR *reason)
@@ -1484,9 +1472,6 @@ void Gui_SetFarmAvailable(BOOL available, const WCHAR *reason)
         HWND control = GetDlgItem(page, controls[i]);
         if (control) EnableWindow(control, available && !s_gui.pipeline_running);
     }
-    if (s_gui.hwnd_btn_race_start)
-        EnableWindow(s_gui.hwnd_btn_race_start,
-                     available && !s_gui.pipeline_running);
     if (!available && reason)
         Gui_SetPipelineEcon(-1, -1, -1, reason, L"");
 }

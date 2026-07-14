@@ -62,11 +62,7 @@ void    Gui_ReadSettings(AppSettings *settings);
 /* Refresh all control text after language change */
 void    Gui_RefreshLanguage(BOOL hook_active, BOOL muted);
 
-/* Auto Race page: update status display */
-void    Gui_UpdateRaceStatus(const WCHAR *status, const WCHAR *step,
-                             int laps, DWORD elapsed_ms);
-
-/* Auto Race page: set running state (enable/disable buttons) */
+/* Auto Race page: set running state (enable/disable profile combo) */
 void    Gui_SetRaceRunning(BOOL running);
 
 /* Auto Race page: populate profile combo box */

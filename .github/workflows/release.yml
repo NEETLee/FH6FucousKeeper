@@ -27,16 +27,16 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build
-        run: make farm-release
+        run: make release-all
 
       - name: Package
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}"
-          # dist/ already contains the full runnable package (exe + hook.dll +
-          # UPX-compressed runtime DLLs + assets + profiles), assembled by
-          # `make farm-release`. Zip its contents at the archive root.
+          # Full (farm) package: dist/ from `make farm-release` (hook.dll embedded in exe).
+          # Lite (anti-pause only): dist-lite/ single exe from `make lite-release`.
           Compress-Archive -Path "dist/*" -DestinationPath "FH6FocusKeeper-$tag.zip"
+          Compress-Archive -Path "dist-lite/*" -DestinationPath "FH6FocusKeeper-Lite-$tag.zip"
 
       - name: Extract release notes
         shell: pwsh

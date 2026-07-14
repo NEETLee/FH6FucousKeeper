@@ -2,7 +2,7 @@
  * settings.c - INI Configuration Management
  *
  * Uses the Windows GetPrivateProfileString/WritePrivateProfileString API
- * for INI file operations. The INI file is stored alongside the executable.
+ * for INI file operations.
  */
 
 #include "settings.h"
@@ -15,21 +15,49 @@
 #define INI_SECTION_AUTORACE L"AutoRace"
 
 static WCHAR s_ini_path[MAX_PATH] = {0};
+static WCHAR s_data_dir[MAX_PATH] = {0};
 
 /* ─── Internal Helpers ────────────────────────────────────────────── */
+
+static BOOL EnsureDataDir(void)
+{
+    if (s_data_dir[0] != L'\0') return TRUE;
+
+#ifdef USE_FARM
+    /* Full build: keep ini/log beside the executable (alongside assets/). */
+    WCHAR exe[MAX_PATH];
+    DWORD n = GetModuleFileNameW(NULL, exe, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) return FALSE;
+    WCHAR *slash = wcsrchr(exe, L'\\');
+    if (slash) *slash = L'\0';
+    else { exe[0] = L'.'; exe[1] = L'\0'; }
+    wcsncpy(s_data_dir, exe, MAX_PATH - 1);
+    s_data_dir[MAX_PATH - 1] = L'\0';
+#else
+    /* Lite: put writable state under %TEMP% so the exe folder stays clean. */
+    WCHAR temp_root[MAX_PATH];
+    DWORD n = GetTempPathW(MAX_PATH, temp_root);
+    if (n == 0 || n >= MAX_PATH) return FALSE;
+    if (_snwprintf(s_data_dir, MAX_PATH, L"%sFH6FocusKeeper", temp_root) >= MAX_PATH)
+        return FALSE;
+    if (!CreateDirectoryW(s_data_dir, NULL) &&
+        GetLastError() != ERROR_ALREADY_EXISTS) {
+        s_data_dir[0] = L'\0';
+        return FALSE;
+    }
+#endif
+    return TRUE;
+}
 
 static void EnsureIniPath(void)
 {
     if (s_ini_path[0] != L'\0') return;
-
-    GetModuleFileNameW(NULL, s_ini_path, MAX_PATH);
-    /* Replace .exe extension with .ini */
-    WCHAR *dot = wcsrchr(s_ini_path, L'.');
-    if (dot) {
-        wcscpy(dot, L".ini");
-    } else {
-        wcscat(s_ini_path, L".ini");
+    if (!EnsureDataDir()) {
+        wcscpy(s_ini_path, L"FocusKeeper.ini");
+        return;
     }
+    _snwprintf(s_ini_path, MAX_PATH, L"%s\\FocusKeeper.ini", s_data_dir);
+    s_ini_path[MAX_PATH - 1] = L'\0';
 }
 
 static int ReadInt(const WCHAR *section, const WCHAR *key, int default_val)
@@ -137,4 +165,15 @@ const WCHAR* Settings_GetPath(void)
 {
     EnsureIniPath();
     return s_ini_path;
+}
+
+BOOL Settings_GetDataFile(const WCHAR *filename, WCHAR *out, int out_cch)
+{
+    if (!filename || !out || out_cch <= 0) return FALSE;
+    if (!EnsureDataDir()) return FALSE;
+    if (_snwprintf(out, out_cch, L"%s\\%s", s_data_dir, filename) >= out_cch) {
+        out[0] = L'\0';
+        return FALSE;
+    }
+    return TRUE;
 }

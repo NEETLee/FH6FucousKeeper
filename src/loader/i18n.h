@@ -174,6 +174,10 @@ typedef enum {
     STR_PIPE_NOTES_EMPTY,
     STR_PIPE_NOTES_OK,
 
+    /* Build edition (full = with auto-race/farm, lite = anti-pause only) */
+    STR_EDITION_FULL,
+    STR_EDITION_LITE,
+
     STR_COUNT
 } StringId;
 

@@ -8,7 +8,8 @@
  * Settings - Configuration Management
  *
  * Reads/writes application settings from/to an INI file.
- * Stored in the same directory as the executable.
+ * Full (USE_FARM) builds keep data beside the executable; Lite builds use
+ * %TEMP%\FH6FocusKeeper\ so the exe directory stays clean.
  */
 
 /* Application settings structure */
@@ -43,6 +44,9 @@ void    Settings_Default(AppSettings *settings);
 
 /* Get path to the INI file */
 const WCHAR* Settings_GetPath(void);
+
+/* Resolve a data file under the settings data directory (creates dir if needed) */
+BOOL    Settings_GetDataFile(const WCHAR *filename, WCHAR *out, int out_cch);
 
 /* Default hotkey: Ctrl+F12 */
 #define DEFAULT_HOTKEY_MOD  MOD_CONTROL

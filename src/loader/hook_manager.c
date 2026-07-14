@@ -2,16 +2,17 @@
  * hook_manager.c - Hook Lifecycle Manager (Facade Pattern)
  *
  * Manages the complete lifecycle of the hook DLL:
- * - Dynamic loading of hook.dll
- * - Symbol resolution for exported functions
+ * - Extract embedded hook.dll (RCDATA) to %TEMP%\FH6FocusKeeper\
+ * - Dynamic LoadLibrary + symbol resolution
  * - Hook installation/removal
- * - Error handling and state management
- * - Observer notification on state changes
+ * - Delete the extracted DLL on shutdown
  */
 
 #include "hook_manager.h"
 #include "hook/hook.h"
+#include "resource.h"
 #include <stdio.h>
+#include <stdarg.h>
 #include <wchar.h>
 
 /* ─── Function pointer types for DLL imports ──────────────────────── */
@@ -29,6 +30,7 @@ static struct {
     HookManagerState    state;
     HookStateCallback   callback;
     WCHAR               last_error[512];
+    WCHAR               extracted_path[MAX_PATH];
     HWND                target_hwnd;
 
     /* Resolved function pointers */
@@ -68,6 +70,153 @@ static void SetError(const WCHAR *fmt, ...)
     }
 }
 
+static BOOL WriteExact(HANDLE h, const void *data, DWORD size)
+{
+    const BYTE *p = (const BYTE *)data;
+    DWORD written_total = 0;
+    while (written_total < size) {
+        DWORD written = 0;
+        if (!WriteFile(h, p + written_total, size - written_total, &written, NULL) ||
+            written == 0) {
+            return FALSE;
+        }
+        written_total += written;
+    }
+    return TRUE;
+}
+
+/* Mix pid/tick/perf-counter into a per-launch random token (not crypto-grade). */
+static void RandomToken(WCHAR *out, int out_cch)
+{
+    LARGE_INTEGER qpc = {0};
+    QueryPerformanceCounter(&qpc);
+    unsigned a = (unsigned)GetCurrentProcessId();
+    unsigned b = (unsigned)GetTickCount();
+    unsigned c = (unsigned)qpc.LowPart ^ (unsigned)(qpc.HighPart * 0x9E3779B9u);
+    unsigned d = (unsigned)GetCurrentThreadId();
+    _snwprintf(out, out_cch, L"%08X%08X",
+               a ^ (c * 0x85EBCA6Bu) ^ (d << 16),
+               b ^ (c >> 7) ^ (a * 0xC2B2AE35u));
+}
+
+/* Best-effort: remove leftover hook_*.dll from a previous crash / killed process. */
+static void CleanupStaleHookDlls(const WCHAR *dir)
+{
+    WCHAR pattern[MAX_PATH];
+    if (_snwprintf(pattern, MAX_PATH, L"%s\\hook_*.dll", dir) >= MAX_PATH)
+        return;
+
+    WIN32_FIND_DATAW fd;
+    HANDLE find = FindFirstFileW(pattern, &fd);
+    if (find == INVALID_HANDLE_VALUE) return;
+    do {
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+        WCHAR path[MAX_PATH];
+        if (_snwprintf(path, MAX_PATH, L"%s\\%s", dir, fd.cFileName) < MAX_PATH)
+            DeleteFileW(path);
+    } while (FindNextFileW(find, &fd));
+    FindClose(find);
+}
+
+/*
+ * Extract the embedded RCDATA payload to
+ *   %TEMP%\FH6FocusKeeper\hook_<random>.dll
+ * A fresh random name each launch avoids sharing a locked file across runs.
+ */
+static BOOL ExtractEmbeddedDll(WCHAR *out_path, int out_cch)
+{
+    HRSRC hrsrc = FindResourceW(NULL, MAKEINTRESOURCEW(IDR_HOOK_DLL), RT_RCDATA);
+    if (!hrsrc) {
+        SetError(L"Embedded hook.dll resource missing (error: %lu)", GetLastError());
+        return FALSE;
+    }
+
+    HGLOBAL hglobal = LoadResource(NULL, hrsrc);
+    if (!hglobal) {
+        SetError(L"LoadResource failed (error: %lu)", GetLastError());
+        return FALSE;
+    }
+
+    const BYTE *data = (const BYTE *)LockResource(hglobal);
+    DWORD size = SizeofResource(NULL, hrsrc);
+    if (!data || size == 0) {
+        SetError(L"Embedded hook.dll resource is empty");
+        return FALSE;
+    }
+
+    WCHAR temp_root[MAX_PATH];
+    DWORD n = GetTempPathW(MAX_PATH, temp_root);
+    if (n == 0 || n >= MAX_PATH) {
+        SetError(L"GetTempPath failed (error: %lu)", GetLastError());
+        return FALSE;
+    }
+
+    WCHAR dir[MAX_PATH];
+    if (_snwprintf(dir, MAX_PATH, L"%sFH6FocusKeeper", temp_root) >= MAX_PATH) {
+        SetError(L"Temp path too long");
+        return FALSE;
+    }
+    if (!CreateDirectoryW(dir, NULL) && GetLastError() != ERROR_ALREADY_EXISTS) {
+        SetError(L"Cannot create temp dir (error: %lu)", GetLastError());
+        return FALSE;
+    }
+
+    CleanupStaleHookDlls(dir);
+
+    WCHAR token[20];
+    RandomToken(token, 20);
+    if (_snwprintf(out_path, out_cch, L"%s\\hook_%s.dll", dir, token) >= out_cch) {
+        SetError(L"Extracted DLL path too long");
+        return FALSE;
+    }
+
+    HANDLE out = CreateFileW(out_path, GENERIC_WRITE, 0, NULL, CREATE_NEW,
+                             FILE_ATTRIBUTE_NORMAL, NULL);
+    if (out == INVALID_HANDLE_VALUE) {
+        /* Extremely unlikely collision — retry once with a new token. */
+        RandomToken(token, 20);
+        if (_snwprintf(out_path, out_cch, L"%s\\hook_%s.dll", dir, token) >= out_cch ||
+            (out = CreateFileW(out_path, GENERIC_WRITE, 0, NULL, CREATE_NEW,
+                               FILE_ATTRIBUTE_NORMAL, NULL)) == INVALID_HANDLE_VALUE) {
+            SetError(L"Cannot write extracted hook.dll (error: %lu)", GetLastError());
+            return FALSE;
+        }
+    }
+    BOOL wrote = WriteExact(out, data, size);
+    CloseHandle(out);
+    if (!wrote) {
+        DeleteFileW(out_path);
+        SetError(L"Failed writing extracted hook.dll");
+        return FALSE;
+    }
+    return TRUE;
+}
+
+static void DeleteExtractedDll(void)
+{
+    if (!s_mgr.extracted_path[0]) return;
+
+    /* Game process may still hold the mapping briefly after UnhookWindowsHookEx. */
+    for (int i = 0; i < 20; i++) {
+        if (DeleteFileW(s_mgr.extracted_path))
+            break;
+        Sleep(50);
+    }
+
+    WCHAR *slash = wcsrchr(s_mgr.extracted_path, L'\\');
+    if (slash) {
+        WCHAR dir[MAX_PATH];
+        size_t len = (size_t)(slash - s_mgr.extracted_path);
+        if (len < MAX_PATH) {
+            wcsncpy(dir, s_mgr.extracted_path, len);
+            dir[len] = L'\0';
+            CleanupStaleHookDlls(dir);
+            RemoveDirectoryW(dir); /* no-op unless empty */
+        }
+    }
+    s_mgr.extracted_path[0] = L'\0';
+}
+
 static BOOL ResolveFunctions(void)
 {
     s_mgr.pfnInstall    = (PFN_Hook_Install)GetProcAddress(s_mgr.dll_handle, "Hook_Install");
@@ -92,35 +241,22 @@ static BOOL ResolveFunctions(void)
 
 BOOL HookMgr_Init(void)
 {
-    WCHAR dll_path[MAX_PATH];
-    DWORD len;
-
     if (s_mgr.dll_handle) return TRUE;
 
-    /* Load hook.dll from the same directory as the executable */
-    len = GetModuleFileNameW(NULL, dll_path, MAX_PATH);
-    if (len == 0) {
-        SetError(L"Cannot get module path");
+    if (!ExtractEmbeddedDll(s_mgr.extracted_path, MAX_PATH))
         return FALSE;
-    }
 
-    /* Replace exe filename with hook.dll */
-    WCHAR *last_slash = wcsrchr(dll_path, L'\\');
-    if (last_slash) {
-        wcscpy(last_slash + 1, L"hook.dll");
-    } else {
-        wcscpy(dll_path, L"hook.dll");
-    }
-
-    s_mgr.dll_handle = LoadLibraryW(dll_path);
+    s_mgr.dll_handle = LoadLibraryW(s_mgr.extracted_path);
     if (!s_mgr.dll_handle) {
-        SetError(L"Cannot load hook.dll (error: %lu)", GetLastError());
+        SetError(L"Cannot load extracted hook.dll (error: %lu)", GetLastError());
+        DeleteExtractedDll();
         return FALSE;
     }
 
     if (!ResolveFunctions()) {
         FreeLibrary(s_mgr.dll_handle);
         s_mgr.dll_handle = NULL;
+        DeleteExtractedDll();
         return FALSE;
     }
 
@@ -137,6 +273,7 @@ void HookMgr_Shutdown(void)
         s_mgr.dll_handle = NULL;
     }
 
+    DeleteExtractedDll();
     ZeroMemory(&s_mgr, sizeof(s_mgr));
 }
 

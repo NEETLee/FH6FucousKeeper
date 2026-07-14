@@ -3,8 +3,9 @@
 #
 # OpenCV drags in libopenblas.dll (~42 MB) which dominates the package; UPX cuts
 # the folder ~78% and the zip ~45% with no functional change (DLLs self-extract
-# at load). hook.dll is SKIPPED on purpose: it has writable shared sections
-# (cross-process IPC) that UPX cannot pack.
+# at load). A loose hook.dll (if present in older layouts) is SKIPPED: it has
+# writable shared sections that UPX cannot pack. Shipping builds embed hook.dll
+# inside the exe instead, so it normally is not present here.
 #
 # If upx is not installed this is a no-op (build still succeeds).
 set -u

@@ -100,6 +100,9 @@
 #define IDC_PIPE_BTN_CAR_NOTES  1122
 #define IDC_PIPE_BTN_RACE_NOTES 1123
 
+/* Embedded hook.dll (extracted to %TEMP% at runtime) */
+#define IDR_HOOK_DLL        150
+
 /* Tray icon */
 #define IDI_APP_ICON        200
 #define IDI_TRAY_ACTIVE     201
