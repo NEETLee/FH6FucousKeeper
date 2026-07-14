@@ -13,6 +13,7 @@
 #include "resource.h"
 #include "logger.h"
 #include "i18n.h"
+#include "version_check.h"
 #include <stdio.h>
 #include <wchar.h>
 #include <shellapi.h>
@@ -484,16 +485,16 @@ void Gui_RefreshLanguage(BOOL hook_active, BOOL muted)
 
     if (!s_gui.hwnd_main) return;
 
-    /* Window title (debug builds get a visible [DEBUG] suffix) */
-#ifdef FK_DEBUG
+    /* Window title with version (debug builds get a visible [DEBUG] suffix) */
     {
         WCHAR title[160];
-        wsprintfW(title, L"%s  [DEBUG]", I18n_Get(STR_APP_TITLE));
+#ifdef FK_DEBUG
+        wsprintfW(title, L"%s v%s  [DEBUG]", I18n_Get(STR_APP_TITLE), APP_VERSION);
+#else
+        wsprintfW(title, L"%s v%s", I18n_Get(STR_APP_TITLE), APP_VERSION);
+#endif
         SetWindowTextW(s_gui.hwnd_main, title);
     }
-#else
-    SetWindowTextW(s_gui.hwnd_main, I18n_Get(STR_APP_TITLE));
-#endif
 
     /* Tab labels */
     if (s_gui.hwnd_tab) {
@@ -571,7 +572,11 @@ void Gui_RefreshLanguage(BOOL hook_active, BOOL muted)
     HWND page0 = s_gui.pages[0];
     if (page0) {
         HWND hab = GetDlgItem(page0, IDC_LBL_ABOUT_BRIEF);
-        if (hab) SetWindowTextW(hab, I18n_Get(STR_ABOUT_BRIEF));
+        if (hab) {
+            WCHAR about[192];
+            wsprintfW(about, L"%s  |  v%s", I18n_Get(STR_ABOUT_BRIEF), APP_VERSION);
+            SetWindowTextW(hab, about);
+        }
         HWND htip = GetDlgItem(page0, IDC_LBL_TIP);
         if (htip) SetWindowTextW(htip, I18n_Get(STR_TIP_WINDOWED));
     }

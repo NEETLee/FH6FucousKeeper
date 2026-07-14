@@ -1322,9 +1322,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         UpdateWindow(hwnd_main);
     }
 
-    /* Auto-find game on startup */
-    if (s_app.settings.auto_find) {
-        DoFindGame();
+    /* Find the game on startup and, if present, auto-enable the anti-pause
+     * hook. This runs regardless of the auto_find setting: the setting only
+     * governs the recurring re-search timer, while startup should always try
+     * to protect an already-running FH6 window. */
+    DoFindGame();
+    if (s_app.game_hwnd && !s_app.hook_active) {
+        LOG_I(L"FH6 window found on startup, enabling anti-pause automatically");
+        DoEnableHook();
+        Gui_UpdateButtons(s_app.hook_active, s_app.game_muted);
     }
 
     LOG_I(L"%s", I18n_Get(STR_LOG_INIT_DONE));
