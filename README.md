@@ -1,5 +1,10 @@
 # FH6 FocusKeeper
 
+> ⚠️ **本项目已停止维护（最终版本 v1.4.0）**
+>
+> 1. **2026-07-14 游戏更新后，官方已自带防暂停**：游戏失去焦点也可继续。设置路径：**抬头显示与游戏 → 游戏 → 失去焦点时暂停**（关闭该选项即可）。
+> 2. **同次更新后，官方修改了蓝图刷技术点规则**，无法再通过蓝图自动刷技术点；本项目的全自动刷图流水线因此失效。
+
 **Forza Horizon 6 防暂停 + 全自动刷图工具** — 游戏切到后台也不暂停，并可在后台自动刷技术点、买车、超级抽奖、清车库。
 
 [🌐 English](docs/README_EN.md)
@@ -26,8 +31,8 @@
 - Windows 10 / Windows 11
 - Forza Horizon 6（Steam 或 Microsoft Store）
 - **以管理员身份运行**（注入游戏进程需要）
-- 完整发布包：`FocusKeeper.exe`、`hook.dll`、`assets/templates/`、`profiles/`（含 `cars/`）  
-  不要只拷贝一个 exe，缺模板或配置会无法刷图
+- 发布包两种：`FH6FocusKeeper-*.zip`（Full，含刷图资源）与 `FH6FocusKeeper-Lite-*.zip`（仅防暂停；单文件 exe，`hook.dll` 已内嵌）  
+  Full 版请保持 `assets/templates/`、`profiles/`（含 `cars/`）目录完整，不要只拷贝一个 exe
 
 ## 使用方法
 
@@ -184,15 +189,22 @@ Dirs=RIGHT,UP,UP,UP,LEFT
 make farm
 # 输出：build/FocusKeeper.exe
 
-# 正式发布包（无调试代码）
+# Full 正式发布包
 make farm-release
-# 输出：dist/ 完整可运行目录
+# 输出：dist/
+
+# Lite 正式发布包（仅防暂停）
+make lite-release
+# 输出：dist-lite/
+
+# 同时打 Full + Lite
+make release-all
 
 make clean
 make rebuild
 ```
 
-> 普通 `make` **不含**刷图流水线。日常使用请下载 Release，或自行 `make farm-release`。
+> 普通 `make` **不含**刷图流水线。日常使用请下载 Release，或自行 `make release-all`。
 
 ## 项目结构
 

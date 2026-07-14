@@ -1,5 +1,10 @@
 # FH6 FocusKeeper
 
+> ⚠️ **This project is discontinued (final release v1.4.0)**
+>
+> 1. **After the 2026-07-14 game update, official anti-pause is built in**: the game can keep running when it loses focus. Path: **HUD and Gameplay → Gameplay → Pause game when focus is lost** (turn that option off).
+> 2. **The same update changed EventLab blueprint skill-point farming rules**, so automatic SP farming via blueprints no longer works; this project's full auto-farm pipeline is obsolete.
+
 **Forza Horizon 6 Anti-Pause + Full Auto Farm** — Keeps the game running when it loses focus, and can farm skill points, buy cars, run super wheelspins, and clear the garage in the background.
 
 [🌐 中文](../README.md)
@@ -26,8 +31,8 @@
 - Windows 10 / Windows 11
 - Forza Horizon 6 (Steam or Microsoft Store)
 - **Run as Administrator** (required to inject into the game process)
-- Full package: `FocusKeeper.exe`, `hook.dll`, `assets/templates/`, `profiles/` (including `cars/`)  
-  Do not copy only the exe — missing templates or profiles will break farming
+- Two release zips: `FH6FocusKeeper-*.zip` (Full, with farm assets) and `FH6FocusKeeper-Lite-*.zip` (anti-pause only; single exe with embedded `hook.dll`)  
+  For Full, keep `assets/templates/` and `profiles/` (including `cars/`) intact — do not copy only the exe
 
 ## Usage
 
@@ -183,15 +188,22 @@ Captures the game window (WGC), matches UI with templates / OCR, and sends input
 make farm
 # → build/FocusKeeper.exe
 
-# Release package (no debug code)
+# Full release package
 make farm-release
-# → dist/ runnable folder
+# → dist/
+
+# Lite release package (anti-pause only)
+make lite-release
+# → dist-lite/
+
+# Full + Lite together
+make release-all
 
 make clean
 make rebuild
 ```
 
-> Plain `make` does **not** include the farm pipeline. End users should download a Release or run `make farm-release`.
+> Plain `make` does **not** include the farm pipeline. End users should download a Release or run `make release-all`.
 
 ## Project Structure
 

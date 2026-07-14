@@ -5,6 +5,22 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.4.0] - 2026-07-14
+
+> **最终版本。本项目停止维护。**
+
+### 重要声明
+- **2026-07-14 游戏更新后，官方已自带防暂停**：游戏失去焦点也可继续运行。设置路径：**抬头显示与游戏 → 游戏 → 失去焦点时暂停**（关闭该选项即可）。本工具的防暂停能力已非必需。
+- **同次更新后，官方修改了蓝图刷技术点规则**，无法再通过蓝图自动刷技术点。本项目的全自动刷图流水线因此失效，**本项目停止维护**。
+
+### 新增
+- **双版本发布包**：Full（含农场 / 自动赛事）与 Lite（仅防暂停 + 静音）；CI 同时上传两份 zip。
+- **内嵌 hook.dll**：不再旁路附带 `hook.dll`，运行时解压到 `%TEMP%` 加载，退出时清理。
+
+### 变更
+- Lite 版将 `FocusKeeper.ini` / 日志写到 `%TEMP%\FH6FocusKeeper\`，保持 exe 目录干净。
+- 窗口标题与关于信息显示版本号及 Full / Lite 标识。
+
 ## [1.3.5] - 2026-07-10
 
 ### 新增
@@ -105,6 +121,7 @@
 - 作者签名、GitHub 仓库链接、窗口模式使用提示。
 - 基于 GitHub Actions 的自动构建与发布流水线。
 
+[1.4.0]: https://github.com/NEETLee/FH6FucousKeeper/compare/v1.3.5...v1.4.0
 [1.3.5]: https://github.com/NEETLee/FH6FucousKeeper/compare/v1.3.4...v1.3.5
 [1.3.4]: https://github.com/NEETLee/FH6FucousKeeper/compare/v1.3.3...v1.3.4
 [1.3.3]: https://github.com/NEETLee/FH6FucousKeeper/compare/v1.3.2...v1.3.3
